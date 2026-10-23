@@ -19,7 +19,7 @@ ln -sfn "$PWD" ~/.pi/agent/extensions/pi-cc-plugins
 | 功能 | 说明 | 扩展 |
 | --- | --- | --- |
 | Ctrl+C 找回 | Ctrl+C 清掉的内容，在空输入框按 ↑ / Ctrl+P 原样放回；没找回的在下次发送时进 ↑ 历史 | `draft.ts` |
-| 回合摘要 | 每轮结束一行：`Ran 3 commands, read 2 files · Completed for 42s · done 6:51 PM` | `turn-summary.ts` |
+| 回合摘要 | 每轮结束一行：`Ran 3 commands, read 2 files · Completed for 42s · done 6:51 PM`，中断的写 `Interrupted for 2s · …` | `turn-summary.ts` |
 
 两个功能是两个独立的扩展。不想要哪个，用 `pi config` 单独停用即可（Pi 可以按扩展启用、停用包里的资源）。
 
@@ -43,10 +43,12 @@ Pi 没有提供这个钩子：`ctrl+c` 是保留键，扩展不能注册；在 `
 ```text
 > Ran 3 commands, read 2 files · Completed for 42s · done 6:51 PM     工具调用 2 次以上
 > Completed for 11s · done 6:51 PM                                     工具调用不到 2 次
+> Interrupted for 2s · done 6:51 PM                                    按 Esc 中断的回合
+> Failed for 3s · done 6:51 PM                                          出错的回合
 ```
 
 - 工具统计照 agent-summary：bash / powershell 按调用次数；read / edit / write 按不同路径去重；其他工具按调用次数；失败单独计。
-- 完成段每轮都有：用时，加上完成时刻（en-US `h:mm AM/PM`）。不设时长门槛；按 Esc 中断的回合也写；loop、monitor 触发的回合一样写。
+- 完成段每轮都有：动词跟随回合结局 —— 正常 Completed、中断（比如按 Esc）Interrupted、出错 Failed，取自回合里最后一条 assistant 消息的结局，和 Pi 自己判定回合结果的方式一致；用时加上完成时刻（en-US `h:mm AM/PM`），两处用 CC 自己的橙色 rgb(215,119,87)（CC 标志的颜色）。不设时长门槛；loop、monitor 触发的回合一样写。
 - 用 `appendEntry` 写进会话：只显示在聊天区，不进模型上下文。
 
 **它替代 agent-summary**：本功能就是 agent-summary 加上完成时间，两个同时开着会出现两行统计。
@@ -77,7 +79,7 @@ npx --yes typescript@5.9.3 tsc --noEmit -p tsconfig.json
 - Ctrl+C 找回：CC 把没找回的内容另存一个列表（本会话最多 10 条），按清空时间插进 ↑ 历史；这里直接写进 Pi 输入框的历史，和发送过的消息放在一起（Pi 最多 100 条）。CC 在查看子 agent 时不写历史，Pi 没有这个视图。
 - 双击 Esc：CC 双击 Esc 也会清空输入框，并写进持久历史；Pi 的 Esc 不清空输入框（bash 模式除外），空输入框双击 Esc 按设置打开 `/tree` 或 `/fork`，所以不在本包范围。
 - 回合摘要：CC 的耗时行是 `✻ Worked for 42s · done 6:51 PM`，整行 dim，动词从 Baked、Brewed、Worked 等词里选，和工具统计分开显示，按 Esc 中断的回合不显示；不是当天的会带上星期或日期。
-  这里按 agent-summary 的引用块格式把两者合成一行，动词固定为 Completed，时刻固定为 `h:mm AM/PM`，中断的回合也显示。
+  这里按 agent-summary 的引用块格式把两者合成一行：正常回合动词固定为 Completed，中断的写 Interrupted、出错的写 Failed，时刻固定为 `h:mm AM/PM`，中断的回合也显示；用时和时刻上 CC 的橙色（CC 那一行整行 dim，不上色）。
 
 ## 许可证
 

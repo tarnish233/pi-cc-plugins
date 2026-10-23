@@ -4,6 +4,12 @@
  *
  *   > *Ran 3 commands, read 2 files · Completed for 42s · done 6:51 PM*   (2+ tool calls)
  *   > *Completed for 11s · done 6:51 PM*                                  (fewer)
+ *   > *Interrupted for 3s · done 6:51 PM*                                 (aborted, e.g. Escape)
+ *
+ * The verb follows the run's outcome — Completed, Interrupted (aborted, for
+ * example Escape) or Failed (error) — taken from the last assistant message
+ * at agent_end. The duration and the clock are painted in Claude Code's own
+ * orange, rgb(215,119,87), the colour of its wordmark and spinner.
  *
  * This is pi-cc-extensions' agent-summary with the completion part of #82/#83,
  * in agent-summary's own format: a markdown quote in italics, drawn in the
@@ -36,7 +42,12 @@ export interface TurnSummaryData {
 	failed: number;
 	durationMs: number;
 	doneAt: number;
+	/** How the run ended: aborted reads Interrupted, error reads Failed. */
+	outcome: TurnOutcome;
 }
+
+/** As Pi's AgentActivityOutcome: how an agent run ended. */
+export type TurnOutcome = "completed" | "aborted" | "error";
 
 type ToolCategory = "bash" | "read" | "edit" | "write" | "other";
 
@@ -95,7 +106,7 @@ export class TurnStats {
 		if (isError) this.failed++;
 	}
 
-	snapshot(now = Date.now()): TurnSummaryData {
+	snapshot(now = Date.now(), outcome: TurnOutcome = "completed"): TurnSummaryData {
 		return {
 			toolCount: this.toolCount,
 			commands: this.commands,
@@ -106,8 +117,21 @@ export class TurnStats {
 			failed: this.failed,
 			durationMs: now - this.startedAt,
 			doneAt: now,
+			outcome,
 		};
 	}
+}
+
+/** The run's outcome, from its last assistant message, as Pi decides it. */
+function runOutcome(messages: ReadonlyArray<{ role?: string; stopReason?: string }>): TurnOutcome {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i];
+		if (message?.role !== "assistant") continue;
+		if (message.stopReason === "aborted") return "aborted";
+		if (message.stopReason === "error") return "error";
+		return "completed";
+	}
+	return "completed";
 }
 
 /** `1h 2m 3s`, `1m 5s`, `42s`; empty under a second (as agent-summary). */
@@ -134,6 +158,8 @@ export interface SummaryColors {
 	success: string;
 	/** ANSI colour for the failure count. */
 	failed: string;
+	/** ANSI colour for the duration and the clock. */
+	accent?: string;
 }
 
 const plural = (count: number) => (count === 1 ? "" : "s");
@@ -163,6 +189,15 @@ function toolText(data: TurnSummaryData, colors: SummaryColors): string {
 		.join(", ");
 }
 
+/** The completion part: `Interrupted for 3s · done 6:51 PM`, the verb from the outcome. */
+function completionText(data: TurnSummaryData, accent: string): string {
+	const verb = data.outcome === "aborted" ? "Interrupted" : data.outcome === "error" ? "Failed" : "Completed";
+	const paint = (text: string) => (accent ? `${accent}${text}\x1b[0m` : text);
+	const duration = paint(formatDuration(data.durationMs) || "0s");
+	const clock = formatDoneClock(data.doneAt);
+	return `${verb} for ${duration}${clock ? ` · done ${paint(clock)}` : ""}`;
+}
+
 /** The line as markdown: `> *tools · Completed for 42s · done 6:51 PM*`. */
 export function summaryMarkdown(data: TurnSummaryData, colors: SummaryColors = { success: "", failed: "" }): string {
 	const parts: string[] = [];
@@ -170,15 +205,16 @@ export function summaryMarkdown(data: TurnSummaryData, colors: SummaryColors = {
 		const tools = toolText(data, colors);
 		if (tools) parts.push(tools);
 	}
-	const done = formatDoneClock(data.doneAt);
-	parts.push(`Completed for ${formatDuration(data.durationMs) || "0s"}${done ? ` · done ${done}` : ""}`);
+	parts.push(completionText(data, colors.accent ?? ""));
 	return `> *${parts.join(" · ")}*`;
 }
 
 export default function turnSummary(pi: ExtensionAPI): void {
+	/** Claude Code's own orange: the "claude" colour, rgb(215,119,87). */
+	const ccOrange = "\x1b[38;2;215;119;87m";
 	pi.registerEntryRenderer<TurnSummaryData>(TURN_SUMMARY_ENTRY_TYPE, (entry, _options, theme) => {
 		if (!entry.data) return undefined;
-		const colors = { success: theme.getFgAnsi("success"), failed: theme.getFgAnsi("error") };
+		const colors = { success: theme.getFgAnsi("success"), failed: theme.getFgAnsi("error"), accent: ccOrange };
 		return new Markdown(summaryMarkdown(entry.data, colors), 1, 0, getMarkdownTheme());
 	});
 
@@ -192,7 +228,7 @@ export default function turnSummary(pi: ExtensionAPI): void {
 	pi.on("tool_execution_end", (event) => {
 		stats.recordToolResult(event.isError === true);
 	});
-	pi.on("agent_end", () => {
-		pi.appendEntry(TURN_SUMMARY_ENTRY_TYPE, stats.snapshot());
+	pi.on("agent_end", (event) => {
+		pi.appendEntry(TURN_SUMMARY_ENTRY_TYPE, stats.snapshot(Date.now(), runOutcome(event.messages)));
 	});
 }

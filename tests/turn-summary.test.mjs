@@ -4,6 +4,11 @@
  *
  *   > *Ran 3 commands, read 2 files · Completed for 42s · done 6:51 PM*   (2+ tool calls)
  *   > *Completed for 11s · done 6:51 PM*                                  (fewer)
+ *   > *Interrupted for 3s · done 6:51 PM*                                 (aborted, e.g. Escape)
+ *
+ * The duration and the clock are painted in Claude Code's own orange
+ * (rgb(215,119,87)); the verb follows the run's outcome: Completed,
+ * Interrupted (aborted) or Failed (error).
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -73,13 +78,42 @@ test("the tool part counts like agent-summary: commands by call, files by distin
 	);
 });
 
-test("an interrupted run still gets its line, as in #83", async () => {
+test("an interrupted run still gets its line, as in #83, and reads Interrupted, not Completed", async () => {
 	const host = fakePi();
 	summary.default(host.pi);
 	await host.emit("agent_start");
 	await host.emit("agent_end", { messages: [{ role: "assistant", stopReason: "aborted", content: [] }] });
 	assert.equal(host.entries.length, 1);
-	assert.match(summaryMarkdown(host.entries[0].data), /^> \*Completed for 0s · done \d{1,2}:\d{2} [AP]M\*$/);
+	assert.equal(host.entries[0].data.outcome, "aborted");
+	assert.match(summaryMarkdown(host.entries[0].data), /^> \*Interrupted for 0s · done \d{1,2}:\d{2} [AP]M\*$/);
+});
+
+test("the verb follows the run's outcome, taken from the last assistant message", async () => {
+	const host = fakePi();
+	summary.default(host.pi);
+	await host.emit("agent_start");
+	await host.emit("agent_end", { messages: [{ role: "assistant", stopReason: "error", content: [] }] });
+	await host.emit("agent_start");
+	await host.emit("agent_end", {
+		messages: [
+			{ role: "assistant", stopReason: "end", content: [] },
+			{ role: "user", content: [] },
+			{ role: "assistant", stopReason: "aborted", content: [] },
+		],
+	});
+	await host.emit("agent_start");
+	// Tool results follow the assistant message; the last assistant still decides.
+	await host.emit("agent_end", {
+		messages: [
+			{ role: "user", content: [] },
+			{ role: "assistant", stopReason: "end", content: [] },
+			{ role: "user", content: [] },
+		],
+	});
+	assert.equal(host.entries.length, 3);
+	assert.match(summaryMarkdown(host.entries[0].data), /^> \*Failed for 0s/);
+	assert.match(summaryMarkdown(host.entries[1].data), /^> \*Interrupted for 0s/);
+	assert.match(summaryMarkdown(host.entries[2].data), /^> \*Completed for 0s/);
 });
 
 test("durations read 1h 2m 3s / 1m 1s / 1s, under a second 0s; the clock is en-US h:mm AM/PM", () => {
@@ -94,16 +128,16 @@ test("durations read 1h 2m 3s / 1m 1s / 1s, under a second 0s; the clock is en-U
 	assert.equal(summaryMarkdown(data), "> *Completed for 0s · done 6:51 PM*");
 });
 
-test("it is drawn the way agent-summary draws: a markdown quote in italics, counts in the success and error colours", async () => {
+test("it is drawn the way agent-summary draws: a markdown quote in italics, counts in the success and error colours, duration and clock in Claude Code's orange", async () => {
 	pi.agent.initTheme("dark", false);
 	const host = fakePi();
 	summary.default(host.pi);
 	const renderer = host.renderers.get(TURN_SUMMARY_ENTRY_TYPE);
 	assert.ok(renderer, "a renderer for its entries");
-	const data = { toolCount: 3, commands: 2, reads: 0, edits: 0, writes: 0, others: 0, failed: 1, durationMs: 42_000, doneAt: DONE };
+	const data = { toolCount: 3, commands: 2, reads: 0, edits: 0, writes: 0, others: 0, failed: 1, durationMs: 42_000, doneAt: DONE, outcome: "completed" };
 	assert.equal(
-		summaryMarkdown(data, { success: "<s>", failed: "<f>" }),
-		"> *Ran <s>2\x1b[0m commands, <f>1\x1b[0m failed · Completed for 42s · done 6:51 PM*",
+		summaryMarkdown(data, { success: "<s>", failed: "<f>", accent: "<o>" }),
+		"> *Ran <s>2\x1b[0m commands, <f>1\x1b[0m failed · Completed for <o>42s\x1b[0m · done <o>6:51 PM\x1b[0m*",
 	);
 
 	const theme = { getFgAnsi: (color) => ({ success: "\x1b[32m", error: "\x1b[31m" })[color] ?? "" };
@@ -114,5 +148,7 @@ test("it is drawn the way agent-summary draws: a markdown quote in italics, coun
 	assert.match(stripAnsi(raw), /Ran 2 commands, 1 failed · Completed for 42s · done 6:51 PM/);
 	assert.match(raw, /\x1b\[32m2/, "the command count in the success colour");
 	assert.match(raw, /\x1b\[31m1/, "the failure count in the error colour");
+	assert.match(raw, /\x1b\[38;2;215;119;87m42s/, "the duration in Claude Code's orange");
+	assert.match(raw, /\x1b\[38;2;215;119;87m6:51 PM/, "the clock in Claude Code's orange");
 	assert.equal(renderer({ ...entry, data: undefined }, {}, theme), undefined, "nothing to draw without data");
 });
