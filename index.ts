@@ -9,9 +9,13 @@
  */
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import draftExtension from "./draft.ts";
+import { registerPiCcCommand } from "./settings.ts";
 import turnSummary from "./turn-summary.ts";
 
 export default function piCcPlugins(pi: ExtensionAPI): void {
 	draftExtension(pi);
 	turnSummary(pi);
+	// The shared pi-cc settings and their /pi_cc command. The first pi-cc
+	// package to load registers it; this one re-claims its own claim on /reload.
+	registerPiCcCommand(pi, "pi-cc-plugins");
 }

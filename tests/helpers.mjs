@@ -70,14 +70,17 @@ export async function loadPi() {
 }
 
 /**
- * A stand-in for the ExtensionAPI: records handlers, entries and renderers.
- * Any other API call is recorded in `calls`, so tests can see that an
- * extension never reaches for what the model sees.
+ * A stand-in for the ExtensionAPI: records handlers, entries, renderers and
+ * commands. Any other API call is recorded in `calls`, so tests can see that
+ * an extension never reaches for what the model sees.
  */
 export function fakePi() {
 	const handlers = new Map();
 	const entries = [];
 	const renderers = new Map();
+	const commands = new Map();
+	const busEvents = [];
+	const busListeners = new Map();
 	const calls = [];
 	const known = {
 		on(event, handler) {
@@ -90,6 +93,21 @@ export function fakePi() {
 		},
 		registerEntryRenderer(customType, renderer) {
 			renderers.set(customType, renderer);
+		},
+		registerCommand(name, options) {
+			commands.set(name, options);
+		},
+		events: {
+			emit(channel, data) {
+				busEvents.push({ channel, data });
+				// The real bus dispatches to the listeners.
+				const list = busListeners.get(channel);
+				if (list) for (const fn of [...list]) fn(data);
+			},
+			on(channel, handler) {
+				if (!busListeners.has(channel)) busListeners.set(channel, []);
+				busListeners.get(channel).push(handler);
+			},
 		},
 	};
 	const pi = new Proxy(known, {
@@ -106,10 +124,15 @@ export function fakePi() {
 		for (const handler of handlers.get(event) ?? []) results.push(await handler({ type: event, ...payload }, ctx));
 		return results;
 	}
-	return { pi, handlers, entries, renderers, calls, emit };
+	return { pi, handlers, entries, renderers, commands, busEvents, calls, emit };
 }
 
 /** The context Pi hands handlers in the interactive TUI. */
 export const TUI_CTX = { mode: "tui", hasUI: true };
+
+/** The sibling extension directory (the pi-cc packages live side by side). */
+export function siblingExtensionDir(name) {
+	return path.resolve(extensionDir, "..", name);
+}
 
 export const stripAnsi = (text) => text.replace(/\x1b\[[0-9;]*m/g, "");

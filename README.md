@@ -23,6 +23,15 @@ ln -sfn "$PWD" ~/.pi/agent/extensions/pi-cc-plugins
 
 包只有一个入口 `index.ts`，在 `pi config` 和启动横幅里显示为一行 `pi-cc-plugins`，和 pi-cc-loop 一样；`pi config` 对它整包启停。两个功能各自在自己的模块里，互不依赖。
 
+## /pi_cc
+
+本包和 pi-cc-loop、pi-cc-monitor 共同提供 `/pi_cc`：pi-cc 家族的设置命令。装了任意一个 pi-cc 包它就在；装了多个，也只有一个
+`/pi_cc`（同名命令会被 Pi 改名成 `/pi_cc:1`、`/pi_cc:2`，所以由最先加载的包认领注册）。
+
+- TUI 里输入 `/pi_cc` 打开设置面板（上下键选择，Enter/空格切换，Esc 关闭）；非 TUI 输出文字摘要
+- `/pi_cc messages on|off`、`/pi_cc footer on|off` 文字命令，适合脚本和 RPC
+- 设置存在 `~/.pi/agent/pi-cc.json`，对 loop 和 monitor 的渲染生效；本包的两个功能不受它们影响，也没有自己的开关
+
 ## Ctrl+C 找回
 
 对齐 Claude Code 2.1.308（输入框状态里的 `holdCleared` / `restoreCleared`）：
