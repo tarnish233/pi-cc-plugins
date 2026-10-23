@@ -23,6 +23,7 @@ const EXTENSIONS = {
 		"tool_execution_start",
 		"tool_execution_end",
 		"agent_end",
+		"agent_settled",
 	],
 };
 

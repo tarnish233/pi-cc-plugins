@@ -50,7 +50,7 @@ Pi 没有提供这个钩子：`ctrl+c` 是保留键，扩展不能注册；在 `
 
 ## 回合摘要
 
-每次 agent 运行结束（`agent_end`）写一行，用 pi-cc-extensions 的 agent-summary 的格式：引用块加斜体，文字取主题的引用色，数字用 success / error 色。
+每轮完全结束（`agent_settled`：交互完成、中断、失败重试耗尽）写一行，用 pi-cc-extensions 的 agent-summary 的格式：引用块加斜体，文字取主题的引用色，数字用 success / error 色。请求失败自动重试时不会中途多写（`agent_end` 每次底层循环结束都发、且扩展侧事件没有 willRetry 标记，等 settle 才写）；统计覆盖整轮，含重试的那几次尝试。
 
 ```text
 > Ran 3 commands, read 2 files · Completed for 42s · done 6:51 PM     工具调用 2 次以上

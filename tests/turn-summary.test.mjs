@@ -1,5 +1,5 @@
 /**
- * turn-summary.ts: one line at every agent_end, in the format of
+ * turn-summary.ts: one line when the whole run settles (agent_settled), in the format of
  * pi-cc-extensions' agent-summary, with the completion part of #82/#83:
  *
  *   > *Ran 3 commands, read 2 files · Completed for 42s · done 6:51 PM*   (2+ tool calls)
@@ -10,6 +10,12 @@
  * orange (rgb(215,119,87)); the AM/PM suffix keeps the line's colour. The
  * verb follows the run's outcome: Completed, Interrupted (aborted) or
  * Failed (error).
+ *
+ * agent_end alone is not the end of a turn: a failed request that Pi will
+ * retry ends the low-level loop, fires agent_end, then re-runs it in the same
+ * run. The extension event carries no willRetry flag (only the public bus
+ * gets one), so the line waits for agent_settled, which fires once when the
+ * whole run is over — done, interrupted, or failed with the retries spent.
  */
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -23,6 +29,12 @@ const summary = await loadModule("turn-summary.ts");
 const config = await loadModule("config.ts");
 const { TURN_SUMMARY_ENTRY_TYPE, summaryMarkdown, formatDuration, formatDoneClock } = summary;
 
+/** agent_end followed by the settled event that writes the line. */
+async function end(host, messages, aborted = false) {
+	await host.emit("agent_end", { messages });
+	await host.emit("agent_settled", { aborted });
+}
+
 /** 6:51:00 PM local time, whatever the time zone. */
 const DONE = new Date(2026, 9, 23, 18, 51, 0).getTime();
 
@@ -33,7 +45,7 @@ async function tool(host, toolName, args = {}, isError = false) {
 	await host.emit("tool_execution_end", { toolCallId, toolName, result: {}, isError });
 }
 
-test("every agent_end writes one entry; the tool part needs 2+ tool calls", async (t) => {
+test("one entry per settled run; the tool part needs 2+ tool calls", async (t) => {
 	t.mock.timers.enable({ apis: ["Date"], now: DONE - 11_000 });
 	const host = fakePi();
 	summary.default(host.pi);
@@ -42,6 +54,8 @@ test("every agent_end writes one entry; the tool part needs 2+ tool calls", asyn
 	await tool(host, "bash", { command: "ls" });
 	t.mock.timers.tick(11_000);
 	await host.emit("agent_end", { messages: [] });
+	assert.equal(host.entries.length, 0, "agent_end alone writes nothing: the run may still retry");
+	await host.emit("agent_settled", {});
 	assert.equal(host.entries.length, 1);
 	assert.equal(host.entries[0].customType, TURN_SUMMARY_ENTRY_TYPE);
 	assert.equal(summaryMarkdown(host.entries[0].data), "> *Completed for 11s · done 6:51 PM*");
@@ -52,7 +66,7 @@ test("every agent_end writes one entry; the tool part needs 2+ tool calls", asyn
 	await tool(host, "read", { path: "a.ts" });
 	await tool(host, "read", { path: "b.ts" });
 	t.mock.timers.tick(42_000);
-	await host.emit("agent_end", { messages: [] });
+	await end(host, []);
 	assert.equal(host.entries.length, 2);
 	assert.equal(
 		summaryMarkdown(host.entries[1].data),
@@ -76,7 +90,7 @@ test("the tool part counts like agent-summary: commands by call, files by distin
 	await tool(host, "mcp.github.search", { q: "x" });
 	await tool(host, "grep", { pattern: "x" });
 	t.mock.timers.tick(42_000);
-	await host.emit("agent_end", { messages: [] });
+	await end(host, []);
 	assert.equal(
 		summaryMarkdown(host.entries[0].data),
 		"> *Ran 2 commands, read 2 files, edited 1 file, wrote 1 file, 2 other tools, 1 failed · Completed for 42s · done 6:51 PM*",
@@ -87,7 +101,7 @@ test("an interrupted run still gets its line, as in #83, and reads Interrupted, 
 	const host = fakePi();
 	summary.default(host.pi);
 	await host.emit("agent_start");
-	await host.emit("agent_end", { messages: [{ role: "assistant", stopReason: "aborted", content: [] }] });
+	await end(host, [{ role: "assistant", stopReason: "aborted", content: [] }], true);
 	assert.equal(host.entries.length, 1);
 	assert.equal(host.entries[0].data.outcome, "aborted");
 	assert.match(summaryMarkdown(host.entries[0].data), /^> \*Interrupted for 0s · done \d{1,2}:\d{2} [AP]M\*$/);
@@ -97,24 +111,20 @@ test("the verb follows the run's outcome, taken from the last assistant message"
 	const host = fakePi();
 	summary.default(host.pi);
 	await host.emit("agent_start");
-	await host.emit("agent_end", { messages: [{ role: "assistant", stopReason: "error", content: [] }] });
+	await end(host, [{ role: "assistant", stopReason: "error", content: [] }]);
 	await host.emit("agent_start");
-	await host.emit("agent_end", {
-		messages: [
-			{ role: "assistant", stopReason: "end", content: [] },
-			{ role: "user", content: [] },
-			{ role: "assistant", stopReason: "aborted", content: [] },
-		],
-	});
+	await end(host, [
+		{ role: "assistant", stopReason: "end", content: [] },
+		{ role: "user", content: [] },
+		{ role: "assistant", stopReason: "aborted", content: [] },
+	]);
 	await host.emit("agent_start");
 	// Tool results follow the assistant message; the last assistant still decides.
-	await host.emit("agent_end", {
-		messages: [
-			{ role: "user", content: [] },
-			{ role: "assistant", stopReason: "end", content: [] },
-			{ role: "user", content: [] },
-		],
-	});
+	await end(host, [
+		{ role: "user", content: [] },
+		{ role: "assistant", stopReason: "end", content: [] },
+		{ role: "user", content: [] },
+	]);
 	assert.equal(host.entries.length, 3);
 	assert.match(summaryMarkdown(host.entries[0].data), /^> \*Failed for 0s/);
 	assert.match(summaryMarkdown(host.entries[1].data), /^> \*Interrupted for 0s/);
@@ -172,7 +182,7 @@ test("the turn summary can be switched off: no line is written while turnSummary
 		await host.emit("agent_start");
 		await tool(host, "bash", { command: "ls" });
 		t.mock.timers.tick(11_000);
-		await host.emit("agent_end", { messages: [] });
+		await end(host, []);
 		assert.equal(host.entries.length, 0, "off: nothing appended");
 
 		config.saveConfig({ turnSummary: true });
@@ -180,10 +190,38 @@ test("the turn summary can be switched off: no line is written while turnSummary
 		await host.emit("agent_start");
 		await tool(host, "bash", { command: "ls" });
 		t.mock.timers.tick(11_000);
-		await host.emit("agent_end", { messages: [] });
+		await end(host, []);
 		assert.equal(host.entries.length, 1, "on: the line is back");
 	} finally {
 		process.env.PI_CC_CONFIG_FILE = saved;
 		config.invalidateConfig();
 	}
+});
+
+
+test("a retry inside the run writes no line of its own: the settled run writes one, from the final messages", async (t) => {
+	t.mock.timers.enable({ apis: ["Date"], now: DONE - 20_000 });
+	const host = fakePi();
+	summary.default(host.pi);
+	await host.emit("agent_start");
+	await tool(host, "bash", { command: "ls" });
+	t.mock.timers.tick(11_000);
+	// The request failed; Pi re-runs the low-level loop within the same run, and
+	// agent.continue() fires agent_start again — that must not reset the stats.
+	await host.emit("agent_end", { messages: [{ role: "assistant", stopReason: "error", content: [] }] });
+	assert.equal(host.entries.length, 0, "the failed attempt writes nothing: the run is not over");
+	await host.emit("agent_start");
+	await tool(host, "bash", { command: "ls -a" });
+	t.mock.timers.tick(9_000);
+	await end(host, [{ role: "assistant", stopReason: "end", content: [] }]);
+	assert.equal(host.entries.length, 1, "one line for the whole run, not one per attempt");
+	assert.equal(host.entries[0].data.commands, 2, "tools of the retry count too");
+	assert.match(summaryMarkdown(host.entries[0].data), /^> \*Ran 2 commands · Completed for 20s · done 6:51 PM\*$/);
+});
+
+test("agent_settled without a run that reached agent_end writes nothing (e.g. cancelled while starting)", async () => {
+	const host = fakePi();
+	summary.default(host.pi);
+	await host.emit("agent_settled", { aborted: true });
+	assert.equal(host.entries.length, 0);
 });

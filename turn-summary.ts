@@ -8,7 +8,7 @@
  *
  * The verb follows the run's outcome — Completed, Interrupted (aborted, for
  * example Escape) or Failed (error) — taken from the last assistant message
- * at agent_end. The duration and the clock are painted in Claude Code's own
+ * of the run. The duration and the clock are painted in Claude Code's own
  * orange, rgb(215,119,87), the colour of its wordmark and spinner.
  *
  * This is pi-cc-extensions' agent-summary with the completion part of #82/#83,
@@ -17,8 +17,14 @@
  * replaces agent-summary, so turn that off in pi-cc-extensions
  * (enableAgentSummary: false), or both lines show.
  *
- * Written at every agent_end, interrupted runs included, with no minimum
- * duration and nothing special for loops or monitors (as #83). appendEntry
+ * Written when the run settles (agent_settled), interrupted runs included,
+ * with no minimum duration and nothing special for loops or monitors (as
+ * #83). agent_end alone is not the end of a turn — a request that Pi will
+ * retry ends the low-level loop and fires one first — and the extension
+ * event carries no willRetry flag, so the line waits for the settle. The
+ * stats cover the whole turn, retry attempts included: agent.continue()
+ * fires agent_start again, which only opens a new turn after a settle.
+ * appendEntry
  * keeps it out of the model's context: it is only drawn in the chat. The
  * shared `turnSummary` setting (pi-cc.json, /pi_cc) switches the line off;
  * saveConfig drops the config cache, so a toggle from the panel applies to
@@ -231,8 +237,18 @@ export default function turnSummary(pi: ExtensionAPI): void {
 	});
 
 	let stats = new TurnStats();
+	/** Messages of the run's last agent_end, kept for the outcome at settle time. */
+	let lastEnd: ReadonlyArray<{ role?: string; stopReason?: string }> | undefined;
+	/** False while a run is active, true again after it settles. */
+	let idle = true;
 	pi.on("agent_start", () => {
+		// agent_start also fires for retries and other continuations inside the
+		// same run (agent.continue()); only the one after idle opens a new turn,
+		// so the summary covers the whole turn, attempts included.
+		if (!idle) return;
 		stats = new TurnStats();
+		lastEnd = undefined;
+		idle = false;
 	});
 	pi.on("tool_execution_start", (event) => {
 		stats.recordToolStart(event.toolName, event.args);
@@ -241,7 +257,21 @@ export default function turnSummary(pi: ExtensionAPI): void {
 		stats.recordToolResult(event.isError === true);
 	});
 	pi.on("agent_end", (event) => {
+		// agent_end is not the end of a turn: a failed request that Pi will retry
+		// ends the low-level loop — this fires — and then the run continues with
+		// another attempt. The extension event carries no willRetry flag (only the
+		// public bus gets one), so only the last one is recorded here.
+		lastEnd = event.messages;
+	});
+	pi.on("agent_settled", () => {
+		// Fires once when the whole run is over: finished, interrupted, or failed
+		// with the retries spent. A run that never reached an agent loop (cancelled
+		// while starting) settles without an agent_end; nothing to write then.
+		idle = true;
+		const messages = lastEnd;
+		lastEnd = undefined;
+		if (!messages) return;
 		if (!loadConfig().turnSummary) return;
-		pi.appendEntry(TURN_SUMMARY_ENTRY_TYPE, stats.snapshot(Date.now(), runOutcome(event.messages)));
+		pi.appendEntry(TURN_SUMMARY_ENTRY_TYPE, stats.snapshot(Date.now(), runOutcome(messages)));
 	});
 }
