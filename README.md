@@ -21,7 +21,7 @@ ln -sfn "$PWD" ~/.pi/agent/extensions/pi-cc-plugins
 | Ctrl+C 找回 | Ctrl+C 清掉的内容，在空输入框按 ↑ / Ctrl+P 原样放回；没找回的在下次发送时进 ↑ 历史 | `draft.ts` |
 | 回合摘要 | 每轮结束一行：`Ran 3 commands, read 2 files · Completed for 42s · done 6:51 PM`，中断的写 `Interrupted for 2s · …` | `turn-summary.ts` |
 
-两个功能是两个独立的扩展。不想要哪个，用 `pi config` 单独停用即可（Pi 可以按扩展启用、停用包里的资源）。
+包只有一个入口 `index.ts`，在 `pi config` 和启动横幅里显示为一行 `pi-cc-plugins`，和 pi-cc-loop 一样；`pi config` 对它整包启停。两个功能各自在自己的模块里，互不依赖。
 
 ## Ctrl+C 找回
 

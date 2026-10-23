@@ -1,8 +1,9 @@
 /**
- * Prompt cache: neither extension changes what the model sees. Caching matches
+ * Prompt cache: neither feature changes what the model sees. Caching matches
  * on the prefix (tools, then the system prompt, then the messages), so an
  * extension must not touch the system prompt, the tools or the history.
  *
+ * The package has one entry point, index.ts, which registers both features:
  * - draft.ts works only in the editor; it listens to session start and end.
  * - turn-summary.ts writes a custom entry with appendEntry: drawn in the chat,
  *   never sent to the model. Checked against Pi's own session context builder.
@@ -13,10 +14,16 @@ import { fakePi, loadModule, loadPi, TUI_CTX } from "./helpers.mjs";
 
 const pi = await loadPi();
 
-/** The events each one listens to, in the order Pi fires them. */
+/** The events the single entry point listens to, in the order Pi fires them. */
 const EXTENSIONS = {
-	"draft.ts": ["session_start", "session_shutdown"],
-	"turn-summary.ts": ["agent_start", "tool_execution_start", "tool_execution_end", "agent_end"],
+	"index.ts": [
+		"session_start",
+		"session_shutdown",
+		"agent_start",
+		"tool_execution_start",
+		"tool_execution_end",
+		"agent_end",
+	],
 };
 
 for (const [file, events] of Object.entries(EXTENSIONS)) {

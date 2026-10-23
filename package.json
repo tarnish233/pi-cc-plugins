@@ -28,8 +28,7 @@
 	],
 	"pi": {
 		"extensions": [
-			"./draft.ts",
-			"./turn-summary.ts"
+			"./index.ts"
 		]
 	},
 	"peerDependencies": {
