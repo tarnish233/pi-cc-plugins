@@ -1,0 +1,49 @@
+{
+	"name": "pi-cc-plugins",
+	"version": "0.1.0",
+	"description": "Small Claude Code behaviours for the Pi coding agent: Ctrl+C keeps the cleared prompt for Up to bring back, and a one-line summary closes every agent run.",
+	"author": "tarnish233",
+	"type": "module",
+	"license": "MIT",
+	"keywords": [
+		"pi-package",
+		"extension",
+		"claude-code",
+		"prompt",
+		"history",
+		"summary"
+	],
+	"homepage": "https://github.com/tarnish233/pi-cc-plugins#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/tarnish233/pi-cc-plugins.git"
+	},
+	"bugs": {
+		"url": "https://github.com/tarnish233/pi-cc-plugins/issues"
+	},
+	"files": [
+		"*.ts",
+		"README.md",
+		"LICENSE"
+	],
+	"pi": {
+		"extensions": [
+			"./draft.ts",
+			"./turn-summary.ts"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"scripts": {
+		"test": "node --test tests/*.test.mjs",
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}
