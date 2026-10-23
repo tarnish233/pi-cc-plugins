@@ -6,9 +6,10 @@
  *   > *Completed for 11s · done 6:51 PM*                                  (fewer)
  *   > *Interrupted for 3s · done 6:51 PM*                                 (aborted, e.g. Escape)
  *
- * The duration and the clock are painted in Claude Code's own orange
- * (rgb(215,119,87)); the verb follows the run's outcome: Completed,
- * Interrupted (aborted) or Failed (error).
+ * The duration and the clock's digits are painted in Claude Code's own
+ * orange (rgb(215,119,87)); the AM/PM suffix keeps the line's colour. The
+ * verb follows the run's outcome: Completed, Interrupted (aborted) or
+ * Failed (error).
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -137,7 +138,7 @@ test("it is drawn the way agent-summary draws: a markdown quote in italics, coun
 	const data = { toolCount: 3, commands: 2, reads: 0, edits: 0, writes: 0, others: 0, failed: 1, durationMs: 42_000, doneAt: DONE, outcome: "completed" };
 	assert.equal(
 		summaryMarkdown(data, { success: "<s>", failed: "<f>", accent: "<o>" }),
-		"> *Ran <s>2\x1b[0m commands, <f>1\x1b[0m failed · Completed for <o>42s\x1b[0m · done <o>6:51 PM\x1b[0m*",
+		"> *Ran <s>2\x1b[0m commands, <f>1\x1b[0m failed · Completed for <o>42s\x1b[0m · done <o>6:51\x1b[0m PM*",
 	);
 
 	const theme = { getFgAnsi: (color) => ({ success: "\x1b[32m", error: "\x1b[31m" })[color] ?? "" };
@@ -149,6 +150,7 @@ test("it is drawn the way agent-summary draws: a markdown quote in italics, coun
 	assert.match(raw, /\x1b\[32m2/, "the command count in the success colour");
 	assert.match(raw, /\x1b\[31m1/, "the failure count in the error colour");
 	assert.match(raw, /\x1b\[38;2;215;119;87m42s/, "the duration in Claude Code's orange");
-	assert.match(raw, /\x1b\[38;2;215;119;87m6:51 PM/, "the clock in Claude Code's orange");
+	assert.match(raw, /\x1b\[38;2;215;119;87m6:51\b/, "the clock's digits in Claude Code's orange");
+	assert.doesNotMatch(raw, /\x1b\[38;2;215;119;87m[\d: ]*PM/, "the AM/PM suffix is not orange");
 	assert.equal(renderer({ ...entry, data: undefined }, {}, theme), undefined, "nothing to draw without data");
 });

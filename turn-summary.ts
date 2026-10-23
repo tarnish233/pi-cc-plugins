@@ -195,7 +195,14 @@ function completionText(data: TurnSummaryData, accent: string): string {
 	const paint = (text: string) => (accent ? `${accent}${text}\x1b[0m` : text);
 	const duration = paint(formatDuration(data.durationMs) || "0s");
 	const clock = formatDoneClock(data.doneAt);
-	return `${verb} for ${duration}${clock ? ` · done ${paint(clock)}` : ""}`;
+	// "6:51 PM": the digits take the accent, the AM/PM suffix keeps the line's colour.
+	const split = clock.match(/^(.*\d)(\s*[AP]M)$/);
+	const clockPainted = split
+		? `${paint(split[1])}${split[2]}`
+		: clock
+			? paint(clock)
+			: "";
+	return `${verb} for ${duration}${clockPainted ? ` · done ${clockPainted}` : ""}`;
 }
 
 /** The line as markdown: `> *tools · Completed for 42s · done 6:51 PM*`. */
