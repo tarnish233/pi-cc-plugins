@@ -7,11 +7,15 @@
  * (InteractiveMode.clearEditor), and every prompt sent goes to addToHistory.
  */
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import { fakePi, loadModule, loadPi, TUI_CTX } from "./helpers.mjs";
 
 const pi = await loadPi();
 const draft = await loadModule("draft.ts");
+const config = await loadModule("config.ts");
 const { CustomEditor } = pi.agent;
 
 const CTRL_C = "\x03";
@@ -226,4 +230,48 @@ test("an editor class without what the patch needs is left alone", () => {
 	const bare = { handleInput() {} };
 	assert.equal(draft.installDraftHold(bare), undefined);
 	assert.deepEqual(Object.keys(bare), ["handleInput"]);
+});
+
+/** A temp pi-cc.json plus PI_CC_CONFIG_FILE pointing at it, restored after. */
+function withConfig(value, body) {
+	const saved = process.env.PI_CC_CONFIG_FILE;
+	const file = fs.mkdtempSync(path.join(os.tmpdir(), "pi-cc-draft-")) + "/pi-cc.json";
+	fs.writeFileSync(file, JSON.stringify(value), "utf8");
+	process.env.PI_CC_CONFIG_FILE = file;
+	config.invalidateConfig();
+	return Promise.resolve(body(file)).finally(() => {
+		process.env.PI_CC_CONFIG_FILE = saved;
+		config.invalidateConfig();
+	});
+}
+
+test("the patch follows the draft setting: off at start, on and off again from a config change", async () => {
+	await withConfig({ draft: false }, async () => {
+		const host = fakePi();
+		draft.default(host.pi);
+		await host.emit("session_start", { reason: "startup" }, TUI_CTX);
+		const ui = makeEditor({ "tui.editor.cursorUp": "up", "tui.editor.historyPrevious": "ctrl+p" });
+		ui.type("held");
+		ui.press(CTRL_C);
+		ui.press(UP);
+		assert.equal(ui.editor.getText(), "", "off: nothing is held");
+
+		// Turned on through the shared /pi_cc command's channel.
+		config.saveConfig({ draft: true });
+		host.pi.events.emit("pi-cc:config", {});
+		ui.type("held");
+		ui.press(CTRL_C);
+		ui.press(UP);
+		assert.equal(ui.editor.getText(), "held", "on: the draft comes back");
+
+		config.saveConfig({ draft: false });
+		host.pi.events.emit("pi-cc:config", {});
+		ui.editor.setText("");
+		ui.type("gone");
+		ui.press(CTRL_C);
+		ui.press(UP);
+		assert.equal(ui.editor.getText(), "", "off again: the patch is taken off");
+
+		await host.emit("session_shutdown", {}, TUI_CTX);
+	});
 });

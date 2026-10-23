@@ -12,11 +12,15 @@
  * Failed (error).
  */
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import { fakePi, loadModule, loadPi, stripAnsi } from "./helpers.mjs";
 
 const pi = await loadPi();
 const summary = await loadModule("turn-summary.ts");
+const config = await loadModule("config.ts");
 const { TURN_SUMMARY_ENTRY_TYPE, summaryMarkdown, formatDuration, formatDoneClock } = summary;
 
 /** 6:51:00 PM local time, whatever the time zone. */
@@ -153,4 +157,33 @@ test("it is drawn the way agent-summary draws: a markdown quote in italics, coun
 	assert.match(raw, /\x1b\[38;2;215;119;87m6:51\b/, "the clock's digits in Claude Code's orange");
 	assert.doesNotMatch(raw, /\x1b\[38;2;215;119;87m[\d: ]*PM/, "the AM/PM suffix is not orange");
 	assert.equal(renderer({ ...entry, data: undefined }, {}, theme), undefined, "nothing to draw without data");
+});
+
+test("the turn summary can be switched off: no line is written while turnSummary is false", async (t) => {
+	t.mock.timers.enable({ apis: ["Date"], now: DONE - 11_000 });
+	const host = fakePi();
+	summary.default(host.pi);
+	const file = fs.mkdtempSync(path.join(os.tmpdir(), "pi-cc-summary-")) + "/pi-cc.json";
+	fs.writeFileSync(file, JSON.stringify({ turnSummary: false }), "utf8");
+	const saved = process.env.PI_CC_CONFIG_FILE;
+	process.env.PI_CC_CONFIG_FILE = file;
+	config.invalidateConfig();
+	try {
+		await host.emit("agent_start");
+		await tool(host, "bash", { command: "ls" });
+		t.mock.timers.tick(11_000);
+		await host.emit("agent_end", { messages: [] });
+		assert.equal(host.entries.length, 0, "off: nothing appended");
+
+		config.saveConfig({ turnSummary: true });
+		host.pi.events.emit("pi-cc:config", {});
+		await host.emit("agent_start");
+		await tool(host, "bash", { command: "ls" });
+		t.mock.timers.tick(11_000);
+		await host.emit("agent_end", { messages: [] });
+		assert.equal(host.entries.length, 1, "on: the line is back");
+	} finally {
+		process.env.PI_CC_CONFIG_FILE = saved;
+		config.invalidateConfig();
+	}
 });

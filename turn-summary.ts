@@ -19,6 +19,10 @@
  *
  * Written at every agent_end, interrupted runs included, with no minimum
  * duration and nothing special for loops or monitors (as #83). appendEntry
+ * keeps it out of the model's context: it is only drawn in the chat. The
+ * shared `turnSummary` setting (pi-cc.json, /pi_cc) switches the line off;
+ * saveConfig drops the config cache, so a toggle from the panel applies to
+ * the very next run.
  * keeps it out of the model's context: it is only drawn in the chat.
  *
  * Tool statistics follow agent-summary (pi-cc-extensions, MIT, © 2026
@@ -28,6 +32,7 @@
 
 import { getMarkdownTheme, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Markdown } from "@earendil-works/pi-tui";
+import { loadConfig } from "./config.ts";
 
 export const TURN_SUMMARY_ENTRY_TYPE = "pi-cc-turn-summary";
 
@@ -236,6 +241,7 @@ export default function turnSummary(pi: ExtensionAPI): void {
 		stats.recordToolResult(event.isError === true);
 	});
 	pi.on("agent_end", (event) => {
+		if (!loadConfig().turnSummary) return;
 		pi.appendEntry(TURN_SUMMARY_ENTRY_TYPE, stats.snapshot(Date.now(), runOutcome(event.messages)));
 	});
 }

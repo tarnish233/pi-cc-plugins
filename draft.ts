@@ -24,9 +24,15 @@
  * The patch goes on at session start in the TUI and comes off at shutdown, so
  * /reload runs the current code. If the editor lacks anything the patch relies
  * on, it stays off and Ctrl+C behaves as before.
+ *
+ * The shared `draft` setting (pi-cc.json, /pi_cc) decides whether it is on at
+ * all; it is read at session start and again whenever a pi-cc package changes
+ * the settings, so the panel turns the patch on and off without a reload.
  */
 
 import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { invalidateConfig, loadConfig } from "./config.ts";
+import { CONFIG_CHANNEL } from "./settings.ts";
 
 /** What the patch uses of Pi's editor: public methods, plus three internals. */
 interface DraftEditor {
@@ -144,9 +150,24 @@ export function installDraftHold(proto: object = CustomEditor.prototype): (() =>
 
 export default function draftExtension(pi: ExtensionAPI): void {
 	let uninstall: (() => void) | undefined;
+	let inTui = false;
+	/** Follow the shared `draft` setting: install or take the patch off. */
+	const sync = () => {
+		const enabled = loadConfig().draft;
+		if (enabled && inTui && !uninstall) uninstall = installDraftHold();
+		else if ((!enabled || !inTui) && uninstall) {
+			uninstall();
+			uninstall = undefined;
+		}
+	};
 	pi.on("session_start", (_event, ctx) => {
-		if (ctx.mode !== "tui" || uninstall) return;
-		uninstall = installDraftHold();
+		inTui = ctx.mode === "tui";
+		sync();
+	});
+	pi.events.on(CONFIG_CHANNEL, () => {
+		// Another pi-cc package changed the shared settings.
+		invalidateConfig();
+		sync();
 	});
 	pi.on("session_shutdown", () => {
 		uninstall?.();

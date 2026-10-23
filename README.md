@@ -29,8 +29,11 @@ ln -sfn "$PWD" ~/.pi/agent/extensions/pi-cc-plugins
 `/pi_cc`（同名命令会被 Pi 改名成 `/pi_cc:1`、`/pi_cc:2`，所以由最先加载的包认领注册）。
 
 - TUI 里输入 `/pi_cc` 打开设置面板（上下键选择，Enter/空格切换，Esc 关闭）；非 TUI 输出文字摘要
-- `/pi_cc messages on|off`、`/pi_cc footer on|off` 文字命令，适合脚本和 RPC
-- 设置存在 `~/.pi/agent/pi-cc.json`，对 loop 和 monitor 的渲染生效；本包的两个功能不受它们影响，也没有自己的开关
+- 文字命令：`/pi_cc <项> on|off`，适合脚本和 RPC
+- 本包的两个功能就是面板里的两项：**Draft recall**（`draft`，默认开，Ctrl+C 找回）和 **Turn summary**（`turnSummary`，默认开，回合摘要）；`/pi_cc draft on|off`、`/pi_cc summary on|off` 切换
+- 切换即时生效，不用 `/reload`：Ctrl+C 找回的补丁当场装/卸，回合摘要从下一轮开始（或停止）写
+- 环境变量 `PI_CC_DRAFT=0`、`PI_CC_TURN_SUMMARY=0` 可临时覆盖，面板里相应项锁定
+- 另外两项（`messages`、`footer`）对 loop 和 monitor 的渲染生效，本包不用
 
 ## Ctrl+C 找回
 
