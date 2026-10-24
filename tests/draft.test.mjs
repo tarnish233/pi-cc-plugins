@@ -248,7 +248,13 @@ function withConfig(value, body) {
 test("the patch follows the draft setting: off at start, on and off again from a config change", async () => {
 	await withConfig({ draft: false }, async () => {
 		const host = fakePi();
-		draft.default(host.pi);
+		// The listener that follows config changes lives in index.ts now; wire
+		// it the way index.ts does.
+		const redraft = draft.default(host.pi);
+		host.pi.events.on("pi-cc:config", () => {
+			config.invalidateConfig();
+			redraft();
+		});
 		await host.emit("session_start", { reason: "startup" }, TUI_CTX);
 		const ui = makeEditor({ "tui.editor.cursorUp": "up", "tui.editor.historyPrevious": "ctrl+p" });
 		ui.type("held");

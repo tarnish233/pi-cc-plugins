@@ -24,12 +24,10 @@
  * event carries no willRetry flag, so the line waits for the settle. The
  * stats cover the whole turn, retry attempts included: agent.continue()
  * fires agent_start again, which only opens a new turn after a settle.
- * appendEntry
- * keeps it out of the model's context: it is only drawn in the chat. The
- * shared `turnSummary` setting (pi-cc.json, /pi_cc) switches the line off;
- * saveConfig drops the config cache, so a toggle from the panel applies to
- * the very next run.
- * keeps it out of the model's context: it is only drawn in the chat.
+ * appendEntry keeps the line out of the model's context: it is only drawn in
+ * the chat. The shared `turnSummary` setting (pi-cc.json, /pi_cc) switches
+ * the line off; saveConfig drops the config cache, so a toggle from the
+ * panel applies to the very next run.
  *
  * Tool statistics follow agent-summary (pi-cc-extensions, MIT, © 2026
  * minuque): bash/powershell count calls, read/edit/write count distinct paths,

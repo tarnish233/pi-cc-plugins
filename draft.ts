@@ -31,8 +31,7 @@
  */
 
 import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { invalidateConfig, loadConfig } from "./config.ts";
-import { CONFIG_CHANNEL } from "./settings.ts";
+import { loadConfig } from "./config.ts";
 
 /** What the patch uses of Pi's editor: public methods, plus three internals. */
 interface DraftEditor {
@@ -148,7 +147,7 @@ export function installDraftHold(proto: object = CustomEditor.prototype): (() =>
 	};
 }
 
-export default function draftExtension(pi: ExtensionAPI): void {
+export default function draftExtension(pi: ExtensionAPI): () => void {
 	let uninstall: (() => void) | undefined;
 	let inTui = false;
 	/** Follow the shared `draft` setting: install or take the patch off. */
@@ -164,13 +163,9 @@ export default function draftExtension(pi: ExtensionAPI): void {
 		inTui = ctx.mode === "tui";
 		sync();
 	});
-	pi.events.on(CONFIG_CHANNEL, () => {
-		// Another pi-cc package changed the shared settings.
-		invalidateConfig();
-		sync();
-	});
 	pi.on("session_shutdown", () => {
 		uninstall?.();
 		uninstall = undefined;
 	});
+	return sync;
 }
