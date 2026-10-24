@@ -1,6 +1,6 @@
 {
 	"name": "pi-cc-plugins",
-	"version": "0.3.0",
+	"version": "0.3.1",
 	"description": "Small Claude Code behaviours for the Pi coding agent: Ctrl+C keeps the cleared prompt for Up to bring back, and a one-line summary closes every agent run.",
 	"author": "tarnish233",
 	"type": "module",
