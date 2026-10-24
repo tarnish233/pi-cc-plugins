@@ -28,9 +28,9 @@ ln -sfn "$PWD" ~/.pi/agent/extensions/pi-cc-plugins
 本包和 pi-cc-loop、pi-cc-monitor、pi-cc-compact 共同提供 `/pi_cc`：pi-cc 家族的设置命令。装了任意一个 pi-cc 包它就在；装了多个，也只有一个
 `/pi_cc`（同名命令会被 Pi 改名成 `/pi_cc:1`、`/pi_cc:2`，所以由最先加载的包认领注册）。
 
-- TUI 里输入 `/pi_cc` 打开设置面板（上下键选择，Enter/空格切换，Esc 关闭）；非 TUI 输出文字摘要
+- TUI 里输入 `/pi_cc` 打开设置面板，按插件分页（Tab / Shift+Tab 切换页，上下键选择，Enter/空格切换，Esc 关闭）；非 TUI 输出文字摘要
 - 文字命令：`/pi_cc <项> on|off`，适合脚本和 RPC
-- 本包的两个功能就是面板里的两项：**Draft recall**（`draft`，默认开，Ctrl+C 找回）和 **Turn summary**（`turnSummary`，默认开，回合摘要）；`/pi_cc draft on|off`、`/pi_cc summary on|off` 切换
+- 本包的两个功能在面板的 Plugins 页：**Draft recall**（`draft`，默认开，Ctrl+C 找回）和 **Turn summary**（`turnSummary`，默认开，回合摘要）；`/pi_cc draft on|off`、`/pi_cc summary on|off` 切换
 - 切换即时生效，不用 `/reload`：Ctrl+C 找回的补丁当场装/卸，回合摘要从下一轮开始（或停止）写
 - 环境变量 `PI_CC_DRAFT=0`、`PI_CC_TURN_SUMMARY=0` 可临时覆盖，面板里相应项锁定
 - 另外几项本包不用：`messages`、`footer` 对 loop 和 monitor 的渲染生效，`compact`、`idle` 属于 pi-cc-compact

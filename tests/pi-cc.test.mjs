@@ -95,14 +95,17 @@ test("a bare /pi_cc opens the panel; outside the TUI it prints the summary", asy
 	});
 });
 
-test("the panel carries the pi-cc-plugins toggles too, and /pi_cc draft off works", async () => {
+test("the pi-cc-plugins toggles have their own page in the panel, one Tab along", async () => {
 	await withTempConfig(async () => {
 		const host = fakePi();
 		index.default(host.pi);
 		const notifications = [];
 		const { ctx, panel } = panelCtx(notifications);
 		const opened = host.commands.get("pi_cc").handler("", ctx);
-		assert.match(panel().render(100).join("\n"), /Draft recall +on/);
+		assert.doesNotMatch(panel().render(100).join("\n"), /Draft recall/, "the first page is Loop & Monitor");
+		panel().handleInput("\t");
+		assert.match(panel().render(100).join("\n"), /Loop & Monitor \/ Plugins \/ Compact/);
+		assert.match(panel().render(100).join("\n"), /→ Draft recall +on/);
 		assert.match(panel().render(100).join("\n"), /Turn summary +on/);
 		panel().handleInput("\x1b");
 		await opened;
