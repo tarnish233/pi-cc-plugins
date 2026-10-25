@@ -74,7 +74,7 @@ Pi 1.3.0 / 1.4.0。
 
 ```bash
 node --test tests/*.test.mjs
-npx --yes typescript@5.9.3 tsc --noEmit -p tsconfig.json
+npx --yes -p typescript@5.9.3 tsc --noEmit -p tsconfig.json
 ```
 
 测试加载真实的 Pi 模块：Ctrl+C 找回直接对 Pi 的 `CustomEditor` 模拟按键。
