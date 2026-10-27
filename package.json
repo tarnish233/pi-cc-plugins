@@ -1,7 +1,7 @@
 {
 	"name": "pi-cc-plugins",
 	"version": "0.4.2",
-	"description": "Small Claude Code behaviours for the Pi coding agent: Ctrl+C keeps the cleared prompt for Up to bring back, and a one-line summary closes every agent run.",
+	"description": "Claude Code's prompt keys for the Pi coding agent: Enter queues while Pi works, Ctrl+Enter sends now, Up brings back the queued message or a cleared draft, and a one-line summary closes every run.",
 	"author": "tarnish233",
 	"type": "module",
 	"license": "MIT",
@@ -10,6 +10,8 @@
 		"extension",
 		"claude-code",
 		"prompt",
+		"keybindings",
+		"queue",
 		"history",
 		"summary"
 	],
