@@ -9,6 +9,8 @@
  * - Up / Ctrl+P on the empty prompt (no suggestions open) puts it back, once.
  * - A draft not put back joins the history when the prompt is next sent, or
  *   at the next Ctrl+C.
+ * - Down / Ctrl+N on the text it put back leaves the prompt as it was before
+ *   the Up (recall.ts), the way the end of the history does.
  * "Up" here is whatever Pi binds to cursor up or history previous, so Ctrl+P
  * counts when keybindings.json binds it.
  *
@@ -33,6 +35,7 @@
 import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.ts";
 import { interceptEditorInput, type ChainEditor } from "./input.ts";
+import { noteRecall, promptDown } from "./recall.ts";
 
 /** What the patch uses of Pi's editor: public methods, plus three internals. */
 interface DraftEditor {
@@ -81,11 +84,13 @@ function keep(editor: DraftEditor): Draft | undefined {
 }
 
 function putBack(editor: DraftEditor, draft: Draft): void {
+	const before = editor.getText();
 	editor.setText(draft.text); // the cursor goes to the end; setText drops the pastes
 	if (draft.pastes) {
 		editor.pastes = new Map(draft.pastes);
 		editor.pasteCounter = draft.pasteCounter;
 	}
+	noteRecall(editor, before);
 }
 
 /** The keys CC's prompt treats as "up on the prompt": cursor up, or history. */
@@ -131,7 +136,7 @@ export function installDraftHold(proto: object = CustomEditor.prototype): (() =>
 			putBack(self, draft);
 			return;
 		}
-		next();
+		promptDown(self, data, keys, next);
 	};
 
 	const remove = interceptEditorInput(hold, proto);

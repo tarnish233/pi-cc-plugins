@@ -19,8 +19,10 @@ const config = await loadModule("config.ts");
 const { CustomEditor } = pi.agent;
 
 const CTRL_C = "\x03";
+const CTRL_N = "\x0e";
 const CTRL_P = "\x10";
 const UP = "\x1b[A";
+const DOWN = "\x1b[B";
 const ENTER = "\r";
 const paste = (text) => `\x1b[200~${text}\x1b[201~`;
 
@@ -80,6 +82,84 @@ test("Ctrl+C keeps the text: Up on the empty editor brings it back, cursor at th
 		assert.equal(editor.getText(), "draft A");
 		type("!");
 		assert.equal(editor.getText(), "draft A!", "the cursor is at the end");
+	});
+});
+
+test("Down and Ctrl+N after Up put the empty prompt back, as after browsing history", async () => {
+	await withDraft(() => {
+		const bindings = { "tui.editor.cursorDown": ["down", "ctrl+n"] };
+		for (const key of [DOWN, CTRL_N]) {
+			const { editor, type, press } = makeEditor(bindings);
+			type("draft A");
+			press(CTRL_C, UP);
+			assert.equal(editor.getText(), "draft A");
+			press(key);
+			assert.equal(editor.getText(), "", "Down clears the prompt, like the end of the history");
+		}
+	});
+});
+
+test("Down walks a multi-line draft to its last line before clearing it", async () => {
+	await withDraft(() => {
+		const { editor, type, press } = makeEditor();
+		type("one");
+		press("\n");
+		type("two");
+		press(CTRL_C, UP);
+		assert.equal(editor.getText(), "one\ntwo");
+		press(UP); // to the first line; the cursor is not at the bottom
+		press(DOWN);
+		assert.equal(editor.getText(), "one\ntwo", "Down moves the cursor while there is a line below");
+		press(DOWN);
+		assert.equal(editor.getText(), "", "on the last line it clears");
+	});
+});
+
+test("Down from a multi-line history entry goes back to the draft in one press", async () => {
+	await withDraft(() => {
+		const { editor, press } = makeEditor();
+		editor.addToHistory("one\ntwo");
+		press(UP);
+		assert.equal(editor.getText(), "one\ntwo");
+		press(DOWN);
+		assert.equal(editor.getText(), "", "Pi walks to the last visual line first; the prompt goes back at once");
+	});
+});
+
+test("Down in a history entry the user edited moves the cursor, not the history", async () => {
+	await withDraft(() => {
+		const { editor, type, press } = makeEditor();
+		editor.addToHistory("one\ntwo");
+		press(UP);
+		type("!");
+		press(DOWN);
+		assert.equal(editor.getText(), "!one\ntwo", "editing ends browsing, so Down is the editor's again");
+	});
+});
+
+test("Down with the menu open is the menu's, not the draft's", async () => {
+	await withDraft(() => {
+		const { editor, type, press } = makeEditor();
+		type("draft A");
+		press(CTRL_C, UP);
+		editor.autocompleteState = "regular";
+		editor.autocompleteList = { handleInput() {}, getSelectedItem: () => ({ value: "draft A", label: "A" }) };
+		press(DOWN);
+		assert.equal(editor.getText(), "draft A", "the menu keeps Down");
+		editor.autocompleteState = null;
+		press(DOWN);
+		assert.equal(editor.getText(), "", "closed, Down clears it again");
+	});
+});
+
+test("Down leaves a draft that was edited after it came back", async () => {
+	await withDraft(() => {
+		const { editor, type, press } = makeEditor();
+		type("draft A");
+		press(CTRL_C, UP);
+		type("!");
+		press(DOWN);
+		assert.equal(editor.getText(), "draft A!", "it is not the text Up put back anymore");
 	});
 });
 

@@ -44,6 +44,8 @@ function fakeSession({ steering = [], followUp = [] } = {}) {
 const ENTER = "\r";
 const ALT_ENTER = "\x1b\r";
 const UP = "\x1b[A";
+const DOWN = "\x1b[B";
+const ALT_UP = "\x1b[1;3A";
 const CTRL_ENTER = "\x1b[13;5u";
 
 const identity = (text) => text;
@@ -129,6 +131,15 @@ test("patched: when idle, Enter still submits (the queue action falls back)", ()
 		type("just send");
 		press(ENTER);
 		assert.deepEqual(calls, { queue: 0, submit: 1 });
+	}));
+
+test("patched: a backslash before Enter still continues the line instead of sending", () =>
+	withKeys(() => {
+		const { editor, calls, type, press } = makeEditor();
+		type("one\\");
+		press(ENTER);
+		assert.equal(editor.getText(), "one\n", "Pi's fallback for terminals without Shift+Enter");
+		assert.deepEqual(calls, { queue: 0, submit: 0 }, "nothing was sent");
 	}));
 
 test("patched: the slash menu keeps Enter — it confirms, then runs the command", () =>
@@ -268,6 +279,85 @@ test("patched: Up with text in the editor never restores the queue", () => {
 		press(UP);
 		assert.equal(restores, 0);
 		assert.equal(editor.getText(), "typing");
+	} finally {
+		uninstall();
+	}
+});
+
+test("patched: Down after a recall puts the empty prompt back, as after browsing history", () => {
+	for (const [name, recall] of [
+		["Up", UP],
+		["Alt+Up", ALT_UP],
+	]) {
+		const { editor, press } = makeEditor();
+		editor.onAction("app.message.dequeue", () => editor.setText("queued message"));
+		const uninstall = keys.installCcKeys(() => true);
+		try {
+			press(recall);
+			assert.equal(editor.getText(), "queued message", name);
+			press(DOWN);
+			assert.equal(editor.getText(), "", `${name} then Down clears the prompt`);
+		} finally {
+			uninstall();
+		}
+	}
+});
+
+test("patched: Down after Alt+Up with text in the editor brings that text back", () => {
+	const { editor, type, press } = makeEditor();
+	editor.onAction("app.message.dequeue", () => {
+		editor.setText(["queued message", editor.getText()].filter((text) => text.trim()).join("\n\n"));
+	});
+	const uninstall = keys.installCcKeys(() => true);
+	try {
+		type("my draft");
+		press(ALT_UP);
+		assert.equal(editor.getText(), "queued message\n\nmy draft");
+		press(DOWN);
+		assert.equal(editor.getText(), "my draft", "the text that was there comes back");
+	} finally {
+		uninstall();
+	}
+});
+
+test("patched: Down leaves a restored message that was edited", () => {
+	const { editor, type, press } = makeEditor();
+	editor.onAction("app.message.dequeue", () => editor.setText("queued message"));
+	const uninstall = keys.installCcKeys(() => true);
+	try {
+		press(UP);
+		type("!");
+		press(DOWN);
+		assert.equal(editor.getText(), "queued message!");
+	} finally {
+		uninstall();
+	}
+});
+
+test("patched: Down ends a multi-line history recall in one press", () => {
+	const { editor, press } = makeEditor();
+	editor.addToHistory("one\ntwo");
+	const uninstall = keys.installCcKeys(() => false);
+	try {
+		press(UP);
+		assert.equal(editor.getText(), "one\ntwo");
+		press(DOWN);
+		assert.equal(editor.getText(), "");
+	} finally {
+		uninstall();
+	}
+});
+
+test("patched: history browsing still clears on Down", () => {
+	const { editor, press, calls } = makeEditor();
+	editor.addToHistory("an older prompt");
+	const uninstall = keys.installCcKeys(() => false);
+	try {
+		press(UP);
+		assert.equal(editor.getText(), "an older prompt");
+		press(DOWN);
+		assert.equal(editor.getText(), "", "the editor's own history handling still runs");
+		assert.deepEqual(calls, { queue: 0, submit: 0 });
 	} finally {
 		uninstall();
 	}

@@ -29,15 +29,27 @@
  * take-one API, so several queued messages come back together; there is no
  * per-message picker, by design.
  *
- * Two editor states need Enter more than the queue action does:
+ * The restored text goes in with setText, so Pi's own Down only moves the
+ * cursor over it. Down / Ctrl+N on its last line puts the prompt back as it
+ * was (recall.ts), for our Up and for Pi's dequeue key (Alt+Up), which the
+ * patch watches for the same reason. The message is in ↑ history — Pi adds it
+ * when it is queued — so the Down does not lose it. The same goes for a
+ * prompt recalled from the history: Pi's Down walks the cursor to the last
+ * visual line first, so a long or multi-line prompt took several presses;
+ * recall.ts ends the browsing in one.
+ *
+ * Three editor states need Enter more than the queue action does:
  *
  * - the slash-command / file menu: Enter confirms the completion, and the
  *   editor's own handling runs after the app actions in CustomEditor, so the
  *   queue action would swallow it (verified on Pi 1.4.0: with only the
  *   keybinding changed, Enter on "/" sent "/" as a prompt);
- * - extension prompts that set `disableSubmit`: Enter must keep doing nothing.
+ * - extension prompts that set `disableSubmit`: Enter must keep doing nothing;
+ * - a backslash right before the cursor: Pi's fallback for terminals that
+ *   cannot send Shift+Enter turns the Enter into a newline, and that lives in
+ *   the editor's own submit branch, below the app actions.
  *
- * In both states the patch runs the editor's handling with the app actions
+ * In those states the patch runs the editor's handling with the app actions
  * cleared, which is how Pi already lets Enter cancel an autocomplete menu
  * (`app.interrupt` guards on isShowingAutocomplete).
  */
@@ -45,16 +57,22 @@
 import { CustomEditor, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.ts";
 import { editorInput, interceptEditorInput, type ChainEditor } from "./input.ts";
+import { noteRecall, promptDown } from "./recall.ts";
 
 const INSTALLED = Symbol.for("pi-cc-plugins:cc-keys");
 /** What the interceptor needs of Pi's editor. */
-const REQUIRED = ["handleInput", "isShowingAutocomplete", "getText"];
+const REQUIRED = ["handleInput", "isShowingAutocomplete", "getText", "setText"];
 
 /** What the patch relies on of Pi's editor: public methods, plus internals. */
 interface CcEditor {
 	handleInput(data: string): void;
 	isShowingAutocomplete(): boolean;
 	getText(): string;
+	setText(text: string): void;
+	getCursor(): { line: number; col: number };
+	getLines(): string[];
+	/** Is the cursor on the last line? (private in Pi's types) */
+	isOnLastVisualLine(): boolean;
 	/** The editor's own submit switch (private); extension prompts set it. */
 	disableSubmit?: boolean;
 	/** CustomEditor's app action handlers (private). */
@@ -158,6 +176,16 @@ function withoutActions(editor: CcEditor, run: () => void): void {
 	}
 }
 
+/** Is the cursor right after a backslash, where Enter continues the line? */
+function continuesLine(editor: CcEditor): boolean {
+	try {
+		const { line, col } = editor.getCursor();
+		return col > 0 && editor.getLines()[line]?.[col - 1] === "\\";
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Add CC's keys and queued-message recall to an editor class. Returns what
  * takes them off again, or undefined when the class lacks something the
@@ -181,17 +209,31 @@ export function installCcKeys(
 		if (!editorOwnsIt && isUpKey(self, data) && self.getText() === "" && hasQueued?.()) {
 			const restore = self.actionHandlers?.get("app.message.dequeue");
 			if (restore) {
+				const before = self.getText();
 				restore();
-				if (self.getText() !== "") return;
+				if (self.getText() !== "") {
+					noteRecall(self, before);
+					return;
+				}
 			}
 		}
-		// The menu and a disabled submit own Enter: let the editor see the key
-		// without any app action taking it first.
-		if (editorOwnsIt && isCcKey(self, data)) {
+		// Pi's own dequeue key (Alt+Up): Pi does the restore, so it keeps its
+		// precedence; the text it put in is remembered for Down afterwards.
+		const dequeue = self.actionHandlers?.get("app.message.dequeue");
+		if (dequeue && matchesAny(self, data, ["app.message.dequeue"])) {
+			const before = self.getText();
+			next();
+			if (self.getText() !== before) noteRecall(self, before);
+			return;
+		}
+		// The menu and a disabled submit own Enter, without any app action taking
+		// it first; so does a backslash before Enter, Pi's newline fallback for
+		// terminals that cannot send Shift+Enter.
+		if (isCcKey(self, data) && (editorOwnsIt || continuesLine(self))) {
 			withoutActions(self, () => editorInput(self, data, proto));
 			return;
 		}
-		next();
+		promptDown(self, data, self.keybindings, next);
 	};
 
 	const remove = interceptEditorInput(intercept, proto);
