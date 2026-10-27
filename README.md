@@ -78,10 +78,12 @@ Pi 没有提供这个钩子：`ctrl+c` 是保留键，扩展不能注册；在 `
 | ↑ / Ctrl+P（输入框为空时） | 把排队的那一条放回输入框重新编辑；没有排队时照旧翻历史 |
 | Alt+Up | 同上（Pi 原有） |
 
-Pi 默认正好相反（Enter 立即插入，Alt+Enter 排队），本功能只是把两个已有动作的键换过来：`app.message.followUp` = `enter`，`tui.input.submit` = `ctrl+enter`。
+Pi 默认正好相反（Enter 立即插入，Alt+Enter 排队），本功能把两个已有动作的键换过来：`app.message.followUp` = `enter`
+（干活时排队，空闲时照常发送），`tui.input.submit` = `enter` + `ctrl+enter`（编辑器自己处理 Enter
+的场合照旧提交，Ctrl+Enter 是「立即发送」）。
 
 - **只改内存里的键位**，不动 `keybindings.json`。你自己在 `keybindings.json` 里给这两个动作任意一个设了键，本功能就整个让位，按你的来。
-- **斜杠菜单和补全保留 Enter**：菜单打开时 Enter 是确认补全，不会被排队动作抢走（Pi 把应用级键位放在编辑器自己的按键处理之前，所以这里在补丁里让菜单和「禁用提交」的编辑器先处理）。
+- **斜杠菜单和补全保留 Enter**：菜单打开时 Enter 先确认补全，命令补全后同一下 Enter 就执行，和 Pi 原样一致，不会被排队动作抢走（Pi 把应用级键位放在编辑器自己的按键处理之前，所以这里在补丁里让菜单和「禁用提交」的编辑器先处理）；「禁用提交」的编辑器里 Enter 只确认补全、不提交。
 - **↑ / Ctrl+P 只在真有排队时接管**：补丁先问会话有没有待发消息（`ctx.hasPendingMessages()`），有才调用 Pi 自己的 dequeue；没有时 ↑ 照旧翻历史。Ctrl+P 要像 CC 那样生效，需要在 `keybindings.json` 把它指到 `tui.editor.cursorUp`。
 - **只做单条排队**：这个功能只考虑"干活时发一条、↑ 拿回来改"这一种用法。Pi 的 dequeue 没有"只取一条"的接口，所以万一真排了多条，↑ 会把它们一次性全部放回输入框；不提供 CC 那种逐条选择，也不打算做。
 - **需要终端能区分带修饰的 Enter**：ghostty、Kitty 等支持 Kitty 键盘协议的终端直接可用；tmux 里要 `set -g extended-keys on`，否则 Ctrl+Enter 可能到不了 Pi。

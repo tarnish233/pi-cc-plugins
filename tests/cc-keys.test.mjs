@@ -131,10 +131,15 @@ test("patched: when idle, Enter still submits (the queue action falls back)", ()
 		assert.deepEqual(calls, { queue: 0, submit: 1 });
 	}));
 
-test("patched: the slash menu keeps Enter — it confirms, it does not queue", () =>
+test("patched: the slash menu keeps Enter — it confirms, then runs the command", () =>
 	withKeys(() => {
 		const { editor, calls } = makeEditor();
 		let applied = 0;
+		let submitted;
+		editor.onSubmit = (text) => {
+			calls.submit++;
+			submitted = text;
+		};
 		editor.setText("/");
 		editor.autocompletePrefix = "/";
 		editor.autocompleteState = "regular";
@@ -150,8 +155,33 @@ test("patched: the slash menu keeps Enter — it confirms, it does not queue", (
 		};
 		editor.handleInput(ENTER);
 		assert.equal(applied, 1, "the completion was applied");
-		assert.equal(editor.getText(), "/settings");
+		assert.equal(submitted, "/settings", "and the same Enter submitted the command, as Pi does");
+		assert.deepEqual(calls, { queue: 0, submit: 1 }, "the queue action never saw it");
+		assert.equal(editor.getText(), "", "the editor is cleared, as after any submit");
+	}));
+
+test("patched: an editor that disables submit applies the completion but submits nothing", () =>
+	withKeys(() => {
+		const { editor, calls } = makeEditor();
+		let applied = 0;
+		editor.disableSubmit = true;
+		editor.setText("/");
+		editor.autocompletePrefix = "/";
+		editor.autocompleteState = "regular";
+		editor.autocompleteList = {
+			handleInput() {},
+			getSelectedItem: () => ({ value: "/settings", label: "settings" }),
+		};
+		editor.autocompleteProvider = {
+			applyCompletion: () => {
+				applied++;
+				return { lines: ["/settings"], cursorLine: 0, cursorCol: 9 };
+			},
+		};
+		editor.handleInput(ENTER);
+		assert.equal(applied, 1);
 		assert.deepEqual(calls, { queue: 0, submit: 0 });
+		assert.equal(editor.getText(), "/settings");
 	}));
 
 test("patched: a keymap the user wrote is left alone", () =>

@@ -9,10 +9,16 @@
  * while streaming and falls back to a normal submit when idle, `tui.input.submit`
  * submits (steers) — so the keys are all that differ.
  *
- * The patch fills the pair into the KeybindingsManager Pi handed the editor:
- * `app.message.followUp` = enter, `tui.input.submit` = ctrl+enter. It is
- * in-memory only; keybindings.json stays the user's. A user who set either
- * action there keeps their keymap, and the feature stays out of the way.
+ * The patch fills the keys into the KeybindingsManager Pi handed the editor:
+ * `app.message.followUp` = enter, `tui.input.submit` = enter and ctrl+enter.
+ * It is in-memory only; keybindings.json stays the user's. A user who set
+ * either action there keeps their keymap, and the feature stays out of the way.
+ *
+ * `tui.input.submit` keeps enter because Pi's editor submits through it when it
+ * handles the key itself: after the slash menu completes a command, the same
+ * Enter falls through to submit, and that is how one Enter runs `/pi_cc`. The
+ * app action is checked first, so outside the menu Enter still goes to the
+ * queue; ctrl+enter is in the list for "send now".
  *
  * Up (and Ctrl+P where keybindings.json points it at cursor up, as CC's prompt
  * maps it) on the empty editor puts the queued message back for editing — CC's
@@ -66,20 +72,32 @@ interface Keybindings {
 
 type EditorPrototype = Record<PropertyKey, unknown>;
 
-/** Claude Code's two keys, as Pi's action names. */
-const CC_BINDINGS: Record<string, string> = {
+/** The actions Claude Code's two keys land on, in Pi's names. */
+const CC_ACTIONS = ["app.message.followUp", "tui.input.submit"] as const;
+
+/**
+ * What those actions are bound to. `tui.input.submit` keeps `enter`: the
+ * editor's slash-menu fall-through submits the command it just completed with
+ * the same Enter, and that check reads this action.
+ */
+const ccBindings = (): Bindings => ({
 	"app.message.followUp": "enter",
-	"tui.input.submit": "ctrl+enter",
-};
+	"tui.input.submit": ["enter", "ctrl+enter"],
+});
 
 type Bindings = Record<string, unknown>;
 
 /** What this patch wrote into a manager, and what was there before it. */
 const patched = new Map<Keybindings, { before: Bindings; after: Bindings }>();
 
+const sameValue = (left: unknown, right: unknown): boolean =>
+	Array.isArray(left) && Array.isArray(right)
+		? left.length === right.length && left.every((key, index) => key === right[index])
+		: left === right;
+
 const sameBindings = (left: Bindings, right: Bindings): boolean => {
 	const keys = Object.keys(left);
-	return keys.length === Object.keys(right).length && keys.every((key) => key in right && left[key] === right[key]);
+	return keys.length === Object.keys(right).length && keys.every((key) => key in right && sameValue(left[key], right[key]));
 };
 
 /**
@@ -95,8 +113,8 @@ function applyCcBindings(manager: Keybindings | undefined): void {
 	if (applied && sameBindings(current, applied.after)) return;
 	patched.delete(manager);
 	// The user's keymap wins, even when it spells out Pi's default pair.
-	if (Object.keys(CC_BINDINGS).some((action) => action in current)) return;
-	const after = { ...current, ...CC_BINDINGS };
+	if (CC_ACTIONS.some((action) => action in current)) return;
+	const after = { ...current, ...ccBindings() };
 	patched.set(manager, { before: { ...current }, after });
 	manager.setUserBindings(after);
 }
@@ -123,7 +141,7 @@ function matchesAny(editor: CcEditor, data: string, actions: string[]): boolean 
 const isUpKey = (editor: CcEditor, data: string): boolean =>
 	matchesAny(editor, data, ["tui.editor.cursorUp", "tui.editor.historyPrevious"]);
 
-const isCcKey = (editor: CcEditor, data: string): boolean => matchesAny(editor, data, Object.keys(CC_BINDINGS));
+const isCcKey = (editor: CcEditor, data: string): boolean => matchesAny(editor, data, [...CC_ACTIONS]);
 
 /** Run the editor's own handling with the app actions out of the way. */
 function withoutActions(editor: CcEditor, run: () => void): void {
