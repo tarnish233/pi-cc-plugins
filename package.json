@@ -1,6 +1,6 @@
 {
 	"name": "pi-cc-plugins",
-	"version": "0.4.2",
+	"version": "0.5.0",
 	"description": "Claude Code's prompt keys for the Pi coding agent: Enter queues while Pi works, Ctrl+Enter sends now, Up brings back the queued message or a cleared draft, and a one-line summary closes every run.",
 	"author": "tarnish233",
 	"type": "module",
