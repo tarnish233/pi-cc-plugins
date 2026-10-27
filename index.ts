@@ -6,8 +6,10 @@
  *
  *   draft.ts         Ctrl+C keeps the cleared prompt; Up puts it back
  *   turn-summary.ts  one line closes every agent run
+ *   cc-keys.ts       Enter queues while Pi works, Ctrl+Enter sends now
  */
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import ccKeysExtension from "./cc-keys.ts";
 import { invalidateConfig } from "./config.ts";
 import draftExtension from "./draft.ts";
 import { CONFIG_CHANNEL, registerPiCcCommand } from "./settings.ts";
@@ -17,11 +19,15 @@ export default function piCcPlugins(pi: ExtensionAPI): void {
 	// Another pi-cc package changed the shared settings: the features read
 	// them again. Each feature listened for itself before; the one cache the
 	// two share makes one listener the honest shape.
+	// cc-keys first, so the draft patch wraps it: Up brings back what Ctrl+C
+	// just cleared before it reaches for an older queued message.
+	const rekey = ccKeysExtension(pi);
 	const redraft = draftExtension(pi);
 	turnSummary(pi);
 	pi.events.on(CONFIG_CHANNEL, () => {
 		invalidateConfig();
 		redraft();
+		rekey();
 	});
 	// The shared pi-cc settings and their /pi_cc command. The first pi-cc
 	// package to load registers it; this one re-claims its own claim on /reload.

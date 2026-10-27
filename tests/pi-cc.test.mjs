@@ -107,19 +107,21 @@ test("the pi-cc-plugins toggles have their own page in the panel, one Tab along"
 		assert.match(panel().render(100).join("\n"), /Loop & Monitor \/ Plugins \/ Compact/);
 		assert.match(panel().render(100).join("\n"), /→ Draft recall +on/);
 		assert.match(panel().render(100).join("\n"), /Turn summary +on/);
+		assert.match(panel().render(100).join("\n"), /CC keys +on/);
 		panel().handleInput("\x1b");
 		await opened;
 	});
 });
 
-test("/pi_cc draft off and /pi_cc summary off write those keys", async () => {
+test("/pi_cc draft off, /pi_cc summary off and /pi_cc keys off write those keys", async () => {
 	await withTempConfig(async (file) => {
 		const host = fakePi();
 		index.default(host.pi);
 		const ctx = { mode: "print", hasUI: true, ui: { notify: () => {} } };
 		await host.commands.get("pi_cc").handler("draft off", ctx);
 		await host.commands.get("pi_cc").handler("summary off", ctx);
-		assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), { draft: false, turnSummary: false });
+		await host.commands.get("pi_cc").handler("keys off", ctx);
+		assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), { draft: false, turnSummary: false, ccKeys: false });
 		const notices = [];
 		const printCtx = { mode: "rpc", hasUI: true, ui: { notify: (m) => notices.push(m) } };
 		await host.commands.get("pi_cc").handler("bogus", ctx);

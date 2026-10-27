@@ -1,6 +1,6 @@
 # pi-cc-plugins
 
-> 把 Claude Code 的几个小行为搬到 Pi：Ctrl+C 清掉的输入，按 ↑ 能找回；每轮结束显示一行摘要（工具统计、用时、完成时刻）。
+> 把 Claude Code 的几个小行为搬到 Pi：Enter 排队、Ctrl+Enter 直接发；Ctrl+C 清掉的输入，按 ↑ 能找回；每轮结束显示一行摘要（工具统计、用时、完成时刻）。
 
 ## 安装
 
@@ -18,10 +18,11 @@ ln -sfn "$PWD" ~/.pi/agent/extensions/pi-cc-plugins
 
 | 功能 | 说明 | 扩展 |
 | --- | --- | --- |
+| CC 键 | Enter 在 Pi 干活时排队，Ctrl+Enter 立即插入当前回合；空闲时 Enter 照常发送；有排队时 ↑ / Ctrl+P 放回输入框 | `cc-keys.ts` |
 | Ctrl+C 找回 | Ctrl+C 清掉的内容，在空输入框按 ↑ / Ctrl+P 原样放回；没找回的在下次发送时进 ↑ 历史 | `draft.ts` |
 | 回合摘要 | 每轮结束一行：`Ran 3 commands, read 2 files · Completed for 42s · done 6:51 PM`，中断的写 `Interrupted for 2s · …` | `turn-summary.ts` |
 
-包只有一个入口 `index.ts`，在 `pi config` 和启动横幅里显示为一行 `pi-cc-plugins`，和 pi-cc-loop 一样；`pi config` 对它整包启停。两个功能各自在自己的模块里，互不依赖。
+包只有一个入口 `index.ts`，在 `pi config` 和启动横幅里显示为一行 `pi-cc-plugins`，和 pi-cc-loop 一样；`pi config` 对它整包启停。三个功能各自在自己的模块里，互不依赖。
 
 ## /pi_cc
 
@@ -30,9 +31,9 @@ ln -sfn "$PWD" ~/.pi/agent/extensions/pi-cc-plugins
 
 - TUI 里输入 `/pi_cc` 打开设置面板，按插件分页（Tab / Shift+Tab 切换页，上下键选择，Enter/空格切换，Esc 关闭）；非 TUI 输出文字摘要
 - 文字命令：`/pi_cc <项> on|off`，适合脚本和 RPC
-- 本包的两个功能在面板的 Plugins 页：**Draft recall**（`draft`，默认开，Ctrl+C 找回）和 **Turn summary**（`turnSummary`，默认开，回合摘要）；`/pi_cc draft on|off`、`/pi_cc summary on|off` 切换
-- 切换即时生效，不用 `/reload`：Ctrl+C 找回的补丁当场装/卸，回合摘要从下一轮开始（或停止）写
-- 环境变量 `PI_CC_DRAFT=0`、`PI_CC_TURN_SUMMARY=0` 可临时覆盖，面板里相应项锁定
+- 本包的三个功能在面板的 Plugins 页：**Draft recall**（`draft`，默认开，Ctrl+C 找回）、**Turn summary**（`turnSummary`，默认开，回合摘要）和 **CC keys**（`ccKeys`，默认开，Enter / Ctrl+Enter）；`/pi_cc draft on|off`、`/pi_cc summary on|off`、`/pi_cc keys on|off` 切换
+- 切换即时生效，不用 `/reload`：Ctrl+C 找回和 CC 键的补丁当场装/卸，回合摘要从下一轮开始（或停止）写
+- 环境变量 `PI_CC_DRAFT=0`、`PI_CC_TURN_SUMMARY=0`、`PI_CC_KEYS=0` 可临时覆盖，面板里相应项锁定
 - 另外几项本包不用：`messages`、`footer` 对 loop 和 monitor 的渲染生效，`compact`、`idle` 属于 pi-cc-compaction
 
 ## Ctrl+C 找回
@@ -66,6 +67,26 @@ Pi 没有提供这个钩子：`ctrl+c` 是保留键，扩展不能注册；在 `
 **它替代 agent-summary**：本功能就是 agent-summary 加上完成时间，两个同时开着会出现两行统计。
 用本包时，请在 pi-cc-extensions 的设置里关掉 agent-summary（`enableAgentSummary: false`）。
 
+## Enter、Ctrl+Enter 与排队
+
+和 Claude Code 2.1.310 一致（它的 `enter` 是 `chat:submit`、`ctrl+enter` 是 `chat:sendNow`；输入框为空时 ↑ 把排队消息放回编辑框，Ctrl+P 也是 ↑）：
+
+| 键 | Pi 里做什么 |
+| --- | --- |
+| Enter | Pi 正在干活时**排队**，这一轮彻底结束后再发（Pi 的 follow-up）；空闲时就是正常发送 |
+| Ctrl+Enter | 立刻发：当前 assistant 回合的工具跑完、下一次模型调用前插入（Pi 的 steering） |
+| ↑ / Ctrl+P（输入框为空时） | 把排队的那一条放回输入框重新编辑；没有排队时照旧翻历史 |
+| Alt+Up | 同上（Pi 原有） |
+
+Pi 默认正好相反（Enter 立即插入，Alt+Enter 排队），本功能只是把两个已有动作的键换过来：`app.message.followUp` = `enter`，`tui.input.submit` = `ctrl+enter`。
+
+- **只改内存里的键位**，不动 `keybindings.json`。你自己在 `keybindings.json` 里给这两个动作任意一个设了键，本功能就整个让位，按你的来。
+- **斜杠菜单和补全保留 Enter**：菜单打开时 Enter 是确认补全，不会被排队动作抢走（Pi 把应用级键位放在编辑器自己的按键处理之前，所以这里在补丁里让菜单和「禁用提交」的编辑器先处理）。
+- **↑ / Ctrl+P 只在真有排队时接管**：补丁先问会话有没有待发消息（`ctx.hasPendingMessages()`），有才调用 Pi 自己的 dequeue；没有时 ↑ 照旧翻历史。Ctrl+P 要像 CC 那样生效，需要在 `keybindings.json` 把它指到 `tui.editor.cursorUp`。
+- **只做单条排队**：这个功能只考虑"干活时发一条、↑ 拿回来改"这一种用法。Pi 的 dequeue 没有"只取一条"的接口，所以万一真排了多条，↑ 会把它们一次性全部放回输入框；不提供 CC 那种逐条选择，也不打算做。
+- **需要终端能区分带修饰的 Enter**：ghostty、Kitty 等支持 Kitty 键盘协议的终端直接可用；tmux 里要 `set -g extended-keys on`，否则 Ctrl+Enter 可能到不了 Pi。
+- 关掉：`/pi_cc keys off`，或 `PI_CC_KEYS=0`，或直接删掉 pi-cc-plugins。
+
 ## 兼容性
 
 Pi 1.3.0 / 1.4.0。
@@ -77,18 +98,19 @@ node --test tests/*.test.mjs
 npx --yes -p typescript@5.9.3 tsc --noEmit -p tsconfig.json
 ```
 
-测试加载真实的 Pi 模块：Ctrl+C 找回直接对 Pi 的 `CustomEditor` 模拟按键。
+测试加载真实的 Pi 模块：Ctrl+C 找回和 CC 键都直接对 Pi 的 `CustomEditor` 模拟按键。
 测别的 Pi 版本时，把 `PI_AGENT_DIR` 指到只装了那个版本的目录（`<dir>/install/releases/<version>`）。
 
 ### 缓存约束
 
-提示缓存按前缀匹配（工具 → system prompt → 消息）。两个扩展都不改模型看到的内容：Ctrl+C 找回只在输入框里工作；回合摘要是 custom entry，不进上下文。
+提示缓存按前缀匹配（工具 → system prompt → 消息）。三个扩展都不改模型看到的内容：Ctrl+C 找回和 CC 键只在输入框里工作；回合摘要是 custom entry，不进上下文。
 两者都不注册会改 prompt 或历史的钩子（`before_agent_start` / `context` / `before_provider_request` 等）。
 `tests/cache.test.mjs` 守住这一点，并用 Pi 自己的 `buildSessionContext` 确认摘要条目不在上下文里。
 
 ## 与 Claude Code 的差异
 
 - Ctrl+C 找回：CC 把没找回的内容另存一个列表（本会话最多 10 条），按清空时间插进 ↑ 历史；这里直接写进 Pi 输入框的历史，和发送过的消息放在一起（Pi 最多 100 条）。CC 在查看子 agent 时不写历史，Pi 没有这个视图。
+- CC 键：只对齐"单条排队"这一种用法——CC 的排队在有多条时按 ↑ 可以逐条选，这里不做选择器；那种情况下 ↑ / Ctrl+P 走 Pi 的 dequeue，会把排队的消息一起放回输入框，和 Alt+Up 相同。CC 的 `Ctrl+X Enter` 显式排队这里没绑。
 - 双击 Esc：CC 双击 Esc 也会清空输入框，并写进持久历史；Pi 的 Esc 不清空输入框（bash 模式除外），空输入框双击 Esc 按设置打开 `/tree` 或 `/fork`，所以不在本包范围。
 - 回合摘要：CC 的耗时行是 `✻ Worked for 42s · done 6:51 PM`，整行 dim，动词从 Baked、Brewed、Worked 等词里选，和工具统计分开显示，按 Esc 中断的回合不显示；不是当天的会带上星期或日期。
   这里按 agent-summary 的引用块格式把两者合成一行：正常回合动词固定为 Completed，中断的写 Interrupted、出错的写 Failed，时刻固定为 `h:mm AM/PM`，中断的回合也显示；用时和时刻的数字上 CC 的橙色（AM/PM 后缀不上；CC 那一行整行 dim，不上色）。

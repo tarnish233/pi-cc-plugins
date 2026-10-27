@@ -1,0 +1,213 @@
+/**
+ * Claude Code's prompt keys: Enter queues while Pi is working, Ctrl+Enter
+ * sends now, and the slash menu keeps Enter for itself.
+ *
+ * CC 2.1.310 (its Chat keymap): enter is chat:submit (queued while busy),
+ * ctrl+enter is chat:sendNow, ctrl+x enter is chat:queueSubmit. Pi's default
+ * is the other way round: enter steers (sent into the run) and alt+enter
+ * queues. The two actions already exist in Pi — `app.message.followUp` queues
+ * while streaming and falls back to a normal submit when idle, `tui.input.submit`
+ * submits (steers) — so the keys are all that differ.
+ *
+ * The patch fills the pair into the KeybindingsManager Pi handed the editor:
+ * `app.message.followUp` = enter, `tui.input.submit` = ctrl+enter. It is
+ * in-memory only; keybindings.json stays the user's. A user who set either
+ * action there keeps their keymap, and the feature stays out of the way.
+ *
+ * Up (and Ctrl+P where keybindings.json points it at cursor up, as CC's prompt
+ * maps it) on the empty editor puts the queued message back for editing — CC's
+ * "Press up to select a queued message to edit", for the single-message case
+ * this feature is for. Pi already has that in its dequeue action, so the patch
+ * only routes the key there when the session reports a pending message; with
+ * nothing queued, Up keeps browsing history. The dequeue action has no
+ * take-one API, so several queued messages come back together; there is no
+ * per-message picker, by design.
+ *
+ * Two editor states need Enter more than the queue action does:
+ *
+ * - the slash-command / file menu: Enter confirms the completion, and the
+ *   editor's own handling runs after the app actions in CustomEditor, so the
+ *   queue action would swallow it (verified on Pi 1.4.0: with only the
+ *   keybinding changed, Enter on "/" sent "/" as a prompt);
+ * - extension prompts that set `disableSubmit`: Enter must keep doing nothing.
+ *
+ * In both states the patch runs the editor's handling with the app actions
+ * cleared, which is how Pi already lets Enter cancel an autocomplete menu
+ * (`app.interrupt` guards on isShowingAutocomplete).
+ */
+
+import { CustomEditor, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { loadConfig } from "./config.ts";
+
+const INSTALLED = Symbol.for("pi-cc-plugins:cc-keys");
+
+/** What the patch relies on of Pi's editor: public methods, plus internals. */
+interface CcEditor {
+	handleInput(data: string): void;
+	isShowingAutocomplete(): boolean;
+	getText(): string;
+	/** The editor's own submit switch (private); extension prompts set it. */
+	disableSubmit?: boolean;
+	/** CustomEditor's app action handlers (private). */
+	actionHandlers?: Map<string, () => void>;
+	/** The KeybindingsManager Pi handed this editor. */
+	keybindings?: Keybindings;
+}
+
+/** The parts of Pi's KeybindingsManager the patch uses. */
+interface Keybindings {
+	matches?(data: string, action: string): boolean;
+	getUserBindings?(): Record<string, unknown>;
+	setUserBindings?(bindings: Record<string, unknown>): void;
+}
+
+type EditorPrototype = Record<PropertyKey, unknown>;
+
+/** Claude Code's two keys, as Pi's action names. */
+const CC_BINDINGS: Record<string, string> = {
+	"app.message.followUp": "enter",
+	"tui.input.submit": "ctrl+enter",
+};
+
+type Bindings = Record<string, unknown>;
+
+/** What this patch wrote into a manager, and what was there before it. */
+const patched = new Map<Keybindings, { before: Bindings; after: Bindings }>();
+
+const sameBindings = (left: Bindings, right: Bindings): boolean => {
+	const keys = Object.keys(left);
+	return keys.length === Object.keys(right).length && keys.every((key) => key in right && left[key] === right[key]);
+};
+
+/**
+ * Give the editor CC's pair, unless the user chose a key for either action.
+ * A manager that still holds what we wrote is left alone; one whose bindings
+ * were replaced since (keybindings.json reloaded, say) is reconciled again.
+ */
+function applyCcBindings(manager: Keybindings | undefined): void {
+	if (typeof manager?.getUserBindings !== "function" || typeof manager.setUserBindings !== "function") return;
+	const current = manager.getUserBindings();
+	if (!current || typeof current !== "object") return;
+	const applied = patched.get(manager);
+	if (applied && sameBindings(current, applied.after)) return;
+	patched.delete(manager);
+	// The user's keymap wins, even when it spells out Pi's default pair.
+	if (Object.keys(CC_BINDINGS).some((action) => action in current)) return;
+	const after = { ...current, ...CC_BINDINGS };
+	patched.set(manager, { before: { ...current }, after });
+	manager.setUserBindings(after);
+}
+
+/**
+ * Put back the bindings each manager held before the patch, for managers still
+ * holding ours: a manager someone else changed since is left as it is.
+ */
+function restoreCcBindings(): void {
+	for (const [manager, { before, after }] of patched) {
+		if (sameBindings(manager.getUserBindings?.() ?? {}, after)) manager.setUserBindings?.(before);
+	}
+	patched.clear();
+}
+
+/** Whether the key is bound to one of these actions on this editor. */
+function matchesAny(editor: CcEditor, data: string, actions: string[]): boolean {
+	const keys = editor.keybindings;
+	if (typeof keys?.matches !== "function") return false;
+	return actions.some((action) => keys.matches?.(data, action));
+}
+
+/** The keys CC's prompt treats as "up on the prompt": cursor up, or history. */
+const isUpKey = (editor: CcEditor, data: string): boolean =>
+	matchesAny(editor, data, ["tui.editor.cursorUp", "tui.editor.historyPrevious"]);
+
+const isCcKey = (editor: CcEditor, data: string): boolean => matchesAny(editor, data, Object.keys(CC_BINDINGS));
+
+/** Run the editor's own handling with the app actions out of the way. */
+function withoutActions(editor: CcEditor, run: () => void): void {
+	const handlers = editor.actionHandlers;
+	if (!(handlers instanceof Map)) {
+		run();
+		return;
+	}
+	editor.actionHandlers = new Map();
+	try {
+		run();
+	} finally {
+		editor.actionHandlers = handlers;
+	}
+}
+
+/**
+ * Patch an editor class. Returns what takes the patch off again, or undefined
+ * when the class lacks something the patch needs or is patched already.
+ */
+export function installCcKeys(hasQueued?: () => boolean, proto: object = CustomEditor.prototype): (() => void) | undefined {
+	const target = proto as EditorPrototype;
+	if (target[INSTALLED]) return undefined;
+	if (typeof target.handleInput !== "function" || typeof target.isShowingAutocomplete !== "function") return undefined;
+
+	const handleInput = target.handleInput as (this: CcEditor, data: string) => void;
+
+	target.handleInput = function (this: CcEditor, data: string): void {
+		applyCcBindings(this.keybindings);
+		// CC: Up on the empty prompt brings a queued message back for editing.
+		// Pi's own dequeue action does the restore; it is only taken here when
+		// the session reports something pending, so Up still browses history.
+		const editorOwnsIt = this.isShowingAutocomplete() || this.disableSubmit === true;
+		if (!editorOwnsIt && isUpKey(this, data) && this.getText() === "" && hasQueued?.()) {
+			const restore = this.actionHandlers?.get("app.message.dequeue");
+			if (restore) {
+				restore();
+				if (this.getText() !== "") return;
+			}
+		}
+		// The menu and a disabled submit own Enter: let the editor see the key
+		// without any app action taking it first.
+		if (editorOwnsIt && isCcKey(this, data)) {
+			withoutActions(this, () => handleInput.call(this, data));
+			return;
+		}
+		handleInput.call(this, data);
+	};
+
+	target[INSTALLED] = true;
+	return () => {
+		target.handleInput = handleInput;
+		delete target[INSTALLED];
+		restoreCcBindings();
+	};
+}
+
+export default function ccKeysExtension(pi: ExtensionAPI): () => void {
+	let uninstall: (() => void) | undefined;
+	let inTui = false;
+	let ctx: ExtensionContext | undefined;
+	/** Does anything wait in the session's queue? A stale ctx counts as no. */
+	const hasQueued = (): boolean => {
+		try {
+			return ctx?.hasPendingMessages?.() === true;
+		} catch {
+			return false;
+		}
+	};
+	/** Follow the shared `ccKeys` setting: install or take the patch off. */
+	const sync = () => {
+		const enabled = loadConfig().ccKeys;
+		if (enabled && inTui && !uninstall) uninstall = installCcKeys(hasQueued);
+		else if ((!enabled || !inTui) && uninstall) {
+			uninstall();
+			uninstall = undefined;
+		}
+	};
+	pi.on("session_start", (_event, sessionCtx) => {
+		inTui = sessionCtx.mode === "tui";
+		ctx = sessionCtx;
+		sync();
+	});
+	pi.on("session_shutdown", () => {
+		uninstall?.();
+		uninstall = undefined;
+		ctx = undefined;
+	});
+	return sync;
+}
