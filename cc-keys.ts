@@ -38,8 +38,11 @@
 
 import { CustomEditor, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.ts";
+import { editorInput, interceptEditorInput, type ChainEditor } from "./input.ts";
 
 const INSTALLED = Symbol.for("pi-cc-plugins:cc-keys");
+/** What the interceptor needs of Pi's editor. */
+const REQUIRED = ["handleInput", "isShowingAutocomplete", "getText"];
 
 /** What the patch relies on of Pi's editor: public methods, plus internals. */
 interface CcEditor {
@@ -138,41 +141,46 @@ function withoutActions(editor: CcEditor, run: () => void): void {
 }
 
 /**
- * Patch an editor class. Returns what takes the patch off again, or undefined
- * when the class lacks something the patch needs or is patched already.
+ * Add CC's keys and queued-message recall to an editor class. Returns what
+ * takes them off again, or undefined when the class lacks something the
+ * interceptor needs or the patch is on already.
  */
-export function installCcKeys(hasQueued?: () => boolean, proto: object = CustomEditor.prototype): (() => void) | undefined {
+export function installCcKeys(
+	hasQueued?: () => boolean,
+	proto: object = CustomEditor.prototype,
+): (() => void) | undefined {
 	const target = proto as EditorPrototype;
 	if (target[INSTALLED]) return undefined;
-	if (typeof target.handleInput !== "function" || typeof target.isShowingAutocomplete !== "function") return undefined;
+	if (!REQUIRED.every((name) => typeof target[name] === "function")) return undefined;
 
-	const handleInput = target.handleInput as (this: CcEditor, data: string) => void;
-
-	target.handleInput = function (this: CcEditor, data: string): void {
-		applyCcBindings(this.keybindings);
+	const intercept = (editor: ChainEditor, data: string, next: () => void): void => {
+		const self = editor as unknown as CcEditor;
+		applyCcBindings(self.keybindings);
 		// CC: Up on the empty prompt brings a queued message back for editing.
 		// Pi's own dequeue action does the restore; it is only taken here when
 		// the session reports something pending, so Up still browses history.
-		const editorOwnsIt = this.isShowingAutocomplete() || this.disableSubmit === true;
-		if (!editorOwnsIt && isUpKey(this, data) && this.getText() === "" && hasQueued?.()) {
-			const restore = this.actionHandlers?.get("app.message.dequeue");
+		const editorOwnsIt = self.isShowingAutocomplete() || self.disableSubmit === true;
+		if (!editorOwnsIt && isUpKey(self, data) && self.getText() === "" && hasQueued?.()) {
+			const restore = self.actionHandlers?.get("app.message.dequeue");
 			if (restore) {
 				restore();
-				if (this.getText() !== "") return;
+				if (self.getText() !== "") return;
 			}
 		}
 		// The menu and a disabled submit own Enter: let the editor see the key
 		// without any app action taking it first.
-		if (editorOwnsIt && isCcKey(this, data)) {
-			withoutActions(this, () => handleInput.call(this, data));
+		if (editorOwnsIt && isCcKey(self, data)) {
+			withoutActions(self, () => editorInput(self, data, proto));
 			return;
 		}
-		handleInput.call(this, data);
+		next();
 	};
 
+	const remove = interceptEditorInput(intercept, proto);
+	if (!remove) return undefined;
 	target[INSTALLED] = true;
 	return () => {
-		target.handleInput = handleInput;
+		remove();
 		delete target[INSTALLED];
 		restoreCcBindings();
 	};

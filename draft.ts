@@ -15,15 +15,15 @@
  * Pi has no hook for this: ctrl+c is reserved for extensions, a shortcut on up
  * would take the key from the editor, and the extension API cannot add to the
  * editor's history. Taking the editor slot would fight pi-cc-extensions' ❯
- * prompt for it, and every editor swap loses history and undo. So this patches
- * CustomEditor, the class every Pi editor shares (the default one and
- * subclasses such as pi-cc-extensions' PromptEditor), and leaves the slot
- * alone. Keys reach only the focused component, so Up in a selector or a
- * dialog never gets here.
+ * prompt for it, and every editor swap loses history and undo. So this adds an
+ * interceptor to the shared key handling (input.ts) for CustomEditor, the
+ * class every Pi editor shares (the default one and subclasses such as
+ * pi-cc-extensions' PromptEditor), and leaves the slot alone. Keys reach only
+ * the focused component, so Up in a selector or a dialog never gets here.
  *
- * The patch goes on at session start in the TUI and comes off at shutdown, so
- * /reload runs the current code. If the editor lacks anything the patch relies
- * on, it stays off and Ctrl+C behaves as before.
+ * The interceptor goes on at session start in the TUI and comes off at
+ * shutdown, so /reload runs the current code. If the editor lacks anything it
+ * relies on, it stays off and Ctrl+C behaves as before.
  *
  * The shared `draft` setting (pi-cc.json, /pi_cc) decides whether it is on at
  * all; it is read at session start and again whenever a pi-cc package changes
@@ -32,6 +32,7 @@
 
 import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.ts";
+import { interceptEditorInput, type ChainEditor } from "./input.ts";
 
 /** What the patch uses of Pi's editor: public methods, plus three internals. */
 interface DraftEditor {
@@ -87,49 +88,57 @@ function putBack(editor: DraftEditor, draft: Draft): void {
 	}
 }
 
+/** The keys CC's prompt treats as "up on the prompt": cursor up, or history. */
+function isUpKey(keys: { matches(data: string, action: string): boolean }, data: string): boolean {
+	return keys.matches(data, "tui.editor.cursorUp") || keys.matches(data, "tui.editor.historyPrevious");
+}
+
 /**
- * Patch an editor class. Returns what takes the patch off again, or undefined
- * when the class lacks something the patch needs or is patched already.
+ * Add the draft hold to an editor class. Returns what takes it off again, or
+ * undefined when the class lacks something it needs or it is on already.
  */
 export function installDraftHold(proto: object = CustomEditor.prototype): (() => void) | undefined {
 	const target = proto as EditorPrototype;
 	if (target[INSTALLED]) return undefined;
 	if (!REQUIRED.every((name) => typeof target[name] === "function")) return undefined;
 
-	const handleInput = target.handleInput as (this: DraftEditor, data: string) => void;
+	// The method under the patch below: a held draft goes into history through
+	// it, never through the wrapper (which would try to hold it too).
 	const addToHistory = target.addToHistory as (this: DraftEditor, text: string) => void;
 	const ownAddToHistory = Object.hasOwn(target, "addToHistory");
 
-	target.handleInput = function (this: DraftEditor, data: string): void {
-		const keys = this.keybindings;
-		if (typeof keys?.matches !== "function") return handleInput.call(this, data);
+	const hold = (editor: ChainEditor, data: string, next: () => void): void => {
+		const self = editor as unknown as DraftEditor;
+		const keys = self.keybindings;
+		if (typeof keys?.matches !== "function") {
+			next();
+			return;
+		}
 		if (keys.matches(data, "app.clear")) {
-			const draft = keep(this);
-			handleInput.call(this, data);
+			const draft = keep(self);
+			next();
 			// Only a press that cleared the editor keeps it (the second press exits Pi).
-			if (draft && this.getText() === "") {
-				const older = drafts.get(this);
-				if (older) addToHistory.call(this, older.expanded);
-				drafts.set(this, draft);
+			if (draft && self.getText() === "") {
+				const older = drafts.get(self);
+				if (older) addToHistory.call(self, older.expanded);
+				drafts.set(self, draft);
 			}
 			return;
 		}
-		const draft = drafts.get(this);
-		if (
-			draft &&
-			this.getText() === "" &&
-			!this.isShowingAutocomplete() &&
-			(keys.matches(data, "tui.editor.cursorUp") || keys.matches(data, "tui.editor.historyPrevious"))
-		) {
-			drafts.delete(this);
-			putBack(this, draft);
+		const draft = drafts.get(self);
+		if (draft && self.getText() === "" && !self.isShowingAutocomplete() && isUpKey(keys, data)) {
+			drafts.delete(self);
+			putBack(self, draft);
 			return;
 		}
-		handleInput.call(this, data);
+		next();
 	};
 
+	const remove = interceptEditorInput(hold, proto);
+	if (!remove) return undefined;
+
 	// Pi calls addToHistory for every prompt sent: a draft still held goes in first.
-	target.addToHistory = function (this: DraftEditor, text: string): void {
+	const wrapperAddToHistory = function (this: DraftEditor, text: string): void {
 		const draft = drafts.get(this);
 		if (draft) {
 			drafts.delete(this);
@@ -137,12 +146,15 @@ export function installDraftHold(proto: object = CustomEditor.prototype): (() =>
 		}
 		addToHistory.call(this, text);
 	};
-
+	target.addToHistory = wrapperAddToHistory;
 	target[INSTALLED] = true;
 	return () => {
-		target.handleInput = handleInput;
-		if (ownAddToHistory) target.addToHistory = addToHistory;
-		else delete target.addToHistory;
+		remove();
+		// Only put Pi's method back if it is still the one below us.
+		if (target.addToHistory === wrapperAddToHistory) {
+			if (ownAddToHistory) target.addToHistory = addToHistory;
+			else delete target.addToHistory;
+		}
 		delete target[INSTALLED];
 	};
 }

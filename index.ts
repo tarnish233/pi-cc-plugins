@@ -19,10 +19,11 @@ export default function piCcPlugins(pi: ExtensionAPI): void {
 	// Another pi-cc package changed the shared settings: the features read
 	// them again. Each feature listened for itself before; the one cache the
 	// two share makes one listener the honest shape.
-	// cc-keys first, so the draft patch wraps it: Up brings back what Ctrl+C
-	// just cleared before it reaches for an older queued message.
-	const rekey = ccKeysExtension(pi);
+	// draft first: interceptors see a key in registration order, so Up on the
+	// empty editor brings back what Ctrl+C just cleared before cc-keys reaches
+	// for an older queued message.
 	const redraft = draftExtension(pi);
+	const rekey = ccKeysExtension(pi);
 	turnSummary(pi);
 	pi.events.on(CONFIG_CHANNEL, () => {
 		invalidateConfig();
