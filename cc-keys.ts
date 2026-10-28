@@ -55,13 +55,14 @@
  */
 
 import { CustomEditor, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { matchesKey } from "@earendil-works/pi-tui";
 import { loadConfig } from "./config.ts";
 import { editorInput, interceptEditorInput, type ChainEditor } from "./input.ts";
 import { noteRecall, promptDown } from "./recall.ts";
 
 const INSTALLED = Symbol.for("pi-cc-plugins:cc-keys");
 /** What the interceptor needs of Pi's editor. */
-const REQUIRED = ["handleInput", "isShowingAutocomplete", "getText", "setText"];
+const REQUIRED = ["handleInput", "isShowingAutocomplete", "getText", "setText", "submitValue"];
 
 /** What the patch relies on of Pi's editor: public methods, plus internals. */
 interface CcEditor {
@@ -69,6 +70,8 @@ interface CcEditor {
 	isShowingAutocomplete(): boolean;
 	getText(): string;
 	setText(text: string): void;
+	/** Pi's own submit, bypassing only its backslash + Enter newline fallback. */
+	submitValue(): void;
 	getCursor(): { line: number; col: number };
 	getLines(): string[];
 	/** Is the cursor on the last line? (private in Pi's types) */
@@ -226,10 +229,16 @@ export function installCcKeys(
 			if (self.getText() !== before) noteRecall(self, before);
 			return;
 		}
+		// Ctrl+Enter is CC's send-now key, including after a backslash. Pi's
+		// submitValue avoids the editor's backslash + Enter newline fallback.
+		if (!editorOwnsIt && patched.has(self.keybindings ?? {}) && matchesKey(data, "ctrl+enter") && continuesLine(self)) {
+			self.submitValue();
+			return;
+		}
 		// The menu and a disabled submit own Enter, without any app action taking
-		// it first; so does a backslash before Enter, Pi's newline fallback for
-		// terminals that cannot send Shift+Enter.
-		if (isCcKey(self, data) && (editorOwnsIt || continuesLine(self))) {
+		// it first; so does a backslash before plain Enter, Pi's newline fallback
+		// for terminals that cannot send Shift+Enter.
+		if (isCcKey(self, data) && (editorOwnsIt || (matchesKey(data, "enter") && continuesLine(self)))) {
 			withoutActions(self, () => editorInput(self, data, proto));
 			return;
 		}

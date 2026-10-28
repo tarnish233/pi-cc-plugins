@@ -142,6 +142,19 @@ test("patched: a backslash before Enter still continues the line instead of send
 		assert.deepEqual(calls, { queue: 0, submit: 0 }, "nothing was sent");
 	}));
 
+test("patched: Ctrl+Enter sends now even when the cursor follows a backslash", () =>
+	withKeys(() => {
+		const { editor, calls, type, press } = makeEditor();
+		editor.onSubmit = (text) => {
+			calls.submit++;
+			assert.equal(text, "one\\", "the backslash was sent, not consumed as a newline escape");
+		};
+		type("one\\");
+		press(CTRL_ENTER);
+		assert.deepEqual(calls, { queue: 0, submit: 1 });
+		assert.equal(editor.getText(), "", "the prompt was sent, not continued onto a new line");
+	}));
+
 test("patched: the slash menu keeps Enter — it confirms, then runs the command", () =>
 	withKeys(() => {
 		const { editor, calls } = makeEditor();
