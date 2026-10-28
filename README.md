@@ -1,6 +1,6 @@
 # pi-cc-plugins
 
-> 把 Claude Code 的几个小行为搬到 Pi：Enter 排队、Ctrl+Enter 直接发；Ctrl+C 清掉的输入，按 ↑ 能找回；每轮结束显示一行摘要（工具统计、用时、完成时刻）。
+> 把 Claude Code 的几个小行为搬到 Pi：Enter 排队，↑ 可取回；Ctrl+C 清掉的输入，按 ↑ 能找回；每轮结束显示一行摘要（工具统计、用时、完成时刻）。
 
 ## 安装
 
@@ -18,7 +18,7 @@ ln -sfn "$PWD" ~/.pi/agent/extensions/pi-cc-plugins
 
 | 功能 | 说明 | 扩展 |
 | --- | --- | --- |
-| CC 键 | Enter 在 Pi 干活时排队，Ctrl+Enter 立即插入当前回合；空闲时 Enter 照常发送；有排队时 ↑ / Ctrl+P 放回输入框，↓ / Ctrl+N 清空 | `cc-keys.ts` |
+| CC 键 | Enter 在 Pi 干活时排队、空闲时照常发送；有排队时 ↑ / Ctrl+P 放回输入框，↓ / Ctrl+N 清空；不提供 Ctrl+Enter 直发 | `cc-keys.ts` |
 | Ctrl+C 找回 | Ctrl+C 清掉的内容，在空输入框按 ↑ / Ctrl+P 原样放回，↓ / Ctrl+N 清空；没找回的在下次发送时进 ↑ 历史 | `draft.ts` |
 | 回合摘要 | 每轮结束一行：`Ran 3 commands, read 2 files · Completed for 42s · done 6:51 PM`，中断的写 `Interrupted for 2s · …` | `turn-summary.ts` |
 
@@ -31,7 +31,7 @@ ln -sfn "$PWD" ~/.pi/agent/extensions/pi-cc-plugins
 
 - TUI 里输入 `/pi_cc` 打开设置面板，按插件分页（Tab / Shift+Tab 切换页，上下键选择，Enter/空格切换，Esc 关闭）；非 TUI 输出文字摘要
 - 文字命令：`/pi_cc <项> on|off`，适合脚本和 RPC
-- 本包的三个功能在面板的 Plugins 页：**Draft recall**（`draft`，默认开，Ctrl+C 找回）、**Turn summary**（`turnSummary`，默认开，回合摘要）和 **CC keys**（`ccKeys`，默认开，Enter / Ctrl+Enter）；`/pi_cc draft on|off`、`/pi_cc summary on|off`、`/pi_cc keys on|off` 切换
+- 本包的三个功能在面板的 Plugins 页：**Draft recall**（`draft`，默认开，Ctrl+C 找回）、**Turn summary**（`turnSummary`，默认开，回合摘要）和 **CC keys**（`ccKeys`，默认开，Enter 排队与 ↑ 取回）；`/pi_cc draft on|off`、`/pi_cc summary on|off`、`/pi_cc keys on|off` 切换
 - 切换即时生效，不用 `/reload`：Ctrl+C 找回和 CC 键的补丁当场装/卸，回合摘要从下一轮开始（或停止）写
 - 环境变量 `PI_CC_DRAFT=0`、`PI_CC_TURN_SUMMARY=0`、`PI_CC_KEYS=0` 可临时覆盖，面板里相应项锁定
 - 另外几项本包不用：`messages`、`footer` 对 loop 和 monitor 的渲染生效，`compact`、`idle` 属于 pi-cc-compaction
@@ -68,28 +68,27 @@ Pi 没有提供这个钩子：`ctrl+c` 是保留键，扩展不能注册；在 `
 **它替代 agent-summary**：本功能就是 agent-summary 加上完成时间，两个同时开着会出现两行统计。
 用本包时，请在 pi-cc-extensions 的设置里关掉 agent-summary（`enableAgentSummary: false`）。
 
-## Enter、Ctrl+Enter 与排队
+## Enter 排队与找回
 
-和 Claude Code 2.1.310 一致（它的 `enter` 是 `chat:submit`、`ctrl+enter` 是 `chat:sendNow`；输入框为空时 ↑ 把排队消息放回编辑框，Ctrl+P 也是 ↑）：
+本功能让 Enter 在工作中排队，并允许在空输入框按 ↑ 取回待发消息；不再提供 Ctrl+Enter 立即发送，也不会用它把已排队的消息改为立即发送。
 
 | 键 | Pi 里做什么 |
 | --- | --- |
 | Enter | Pi 正在干活时**排队**，这一轮彻底结束后再发（Pi 的 follow-up）；空闲时就是正常发送 |
-| Ctrl+Enter | 立刻发：当前 assistant 回合的工具跑完、下一次模型调用前插入（Pi 的 steering） |
+| Ctrl+Enter | 本包不绑定；终端能区分该键且未自行设置时不发送，也不会影响已经排队的消息 |
 | ↑ / Ctrl+P（输入框为空时） | 把排队的那一条放回输入框重新编辑；没有排队时照旧翻历史 |
 | ↓ / Ctrl+N（放回的文本 / 翻出的历史上） | 一下回到按 ↑ 之前的样子（通常是清空） |
 | Alt+Up | Pi 原有的 dequeue，**仍然可用、没改键**：不管有没有排队都调用它（空时提示 No queued messages to restore）；放回后 ↓ 同样清空 |
 
-Pi 默认正好相反（Enter 立即插入，Alt+Enter 排队），本功能把两个已有动作的键换过来：`app.message.followUp` = `enter`
-（干活时排队，空闲时照常发送），`tui.input.submit` = `enter` + `ctrl+enter`（编辑器自己处理 Enter
-的场合照旧提交，Ctrl+Enter 是「立即发送」）。
+Pi 默认是 Enter 立即插入、Alt+Enter 排队。本功能把 `app.message.followUp` 绑定到 `enter`
+（干活时排队，空闲时照常发送），保留 `tui.input.submit` = `enter` 供编辑器处理斜杠命令等情况；不再给它增加 `ctrl+enter`。
 
 - **只改内存里的键位**，不动 `keybindings.json`。你自己在 `keybindings.json` 里给这两个动作任意一个设了键，本功能就整个让位，按你的来。
-- **斜杠菜单、禁用提交和行尾反斜杠保留 Enter**：菜单打开时 Enter 先确认补全，命令补全后同一下 Enter 就执行，和 Pi 原样一致，不会被排队动作抢走（Pi 把应用级键位放在编辑器自己的按键处理之前，所以这里在补丁里让它们先处理）；「禁用提交」的编辑器里 Enter 只确认补全、不提交；输入框里光标前是 `\` 时，普通 Enter 按 Pi 的原样换行而不发送（给发不出 Shift+Enter 的终端用），Ctrl+Enter 仍立即发送。
+- **斜杠菜单、禁用提交和行尾反斜杠保留 Enter**：菜单打开时 Enter 先确认补全，命令补全后同一下 Enter 就执行，和 Pi 原样一致，不会被排队动作抢走（Pi 把应用级键位放在编辑器自己的按键处理之前，所以这里在补丁里让它们先处理）；「禁用提交」的编辑器里 Enter 只确认补全、不提交；输入框里光标前是 `\` 时，Enter 按 Pi 的原样换行而不发送（给发不出 Shift+Enter 的终端用）。
 - **↑ / Ctrl+P 只在真有排队时接管**：补丁先问会话有没有待发消息（`ctx.hasPendingMessages()`），有才调用 Pi 自己的 dequeue；没有时 ↑ 照旧翻历史。Ctrl+P 要像 CC 那样生效，需要在 `keybindings.json` 把它指到 `tui.editor.cursorUp`。`app.message.dequeue` 这个动作还是原来的 Alt+Up（Pi 的提示 “Option+Up to edit all queued messages” 也是它），本功能没有换掉、也没有解绑 —— ↑ / Ctrl+P 只是多了一条“有排队时”的路。
 - **↓ / Ctrl+N 一下回到草稿**：放回用的是 `setText`，Pi 的 ↓ 只在翻历史时清空输入框，所以放回的内容会留在框里；而翻历史时，Pi 的 ↓ 又要等光标走到最后一个可视行——长提示或折行提示要按好几下才清空（短提示一下就空，看起来时灵时不灵）。补丁记住放回前的内容，并在翻历史时直接调用 Pi 自己的 `navigateHistory(1)`：一下回到按 ↑ 之前的样子。文本改动过就不再介入。排队的消息本来就进了 ↑ 历史，收回后仍能按 ↑ 找回来。
 - **只做单条排队**：这个功能只考虑"干活时发一条、↑ 拿回来改"这一种用法。Pi 的 dequeue 没有"只取一条"的接口，所以万一真排了多条，↑ 会把它们一次性全部放回输入框；不提供 CC 那种逐条选择，也不打算做。
-- **需要终端能区分带修饰的 Enter**：ghostty、Kitty 等支持 Kitty 键盘协议的终端直接可用；tmux 里要 `set -g extended-keys on`，否则 Ctrl+Enter 可能到不了 Pi。
+- **终端按键限制**：如果终端把 Ctrl+Enter 报告成普通 Enter，Pi 无法区分，两者都会按 Enter 的规则处理；本包只是不再主动绑定可区分的 Ctrl+Enter。
 - 关掉：`/pi_cc keys off`，或 `PI_CC_KEYS=0`，或直接删掉 pi-cc-plugins。
 
 ## 兼容性

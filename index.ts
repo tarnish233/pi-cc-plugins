@@ -7,7 +7,7 @@
  *   draft.ts         Ctrl+C keeps the cleared prompt; Up puts it back
  *   recall.ts        Down on a text Up put back restores the prompt
  *   turn-summary.ts  one line closes every agent run
- *   cc-keys.ts       Enter queues while Pi works, Ctrl+Enter sends now
+ *   cc-keys.ts       Enter queues while Pi works; Up recalls queued messages
  */
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import ccKeysExtension from "./cc-keys.ts";

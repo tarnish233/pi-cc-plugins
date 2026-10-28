@@ -1,16 +1,11 @@
 /**
- * Claude Code's prompt keys: Enter queues while Pi is working, Ctrl+Enter
- * sends now, and the slash menu keeps Enter for itself.
+ * Prompt keys: Enter queues while Pi is working; the slash menu keeps Enter
+ * for itself. The Ctrl+Enter send-now shortcut is intentionally not provided.
  *
- * CC 2.1.310 (its Chat keymap): enter is chat:submit (queued while busy),
- * ctrl+enter is chat:sendNow, ctrl+x enter is chat:queueSubmit. Pi's default
- * is the other way round: enter steers (sent into the run) and alt+enter
- * queues. The two actions already exist in Pi — `app.message.followUp` queues
- * while streaming and falls back to a normal submit when idle, `tui.input.submit`
- * submits (steers) — so the keys are all that differ.
- *
- * The patch fills the keys into the KeybindingsManager Pi handed the editor:
- * `app.message.followUp` = enter, `tui.input.submit` = enter and ctrl+enter.
+ * Pi's default is enter steers (sent into the run) and alt+enter queues.
+ * `app.message.followUp` queues while streaming and falls back to a normal
+ * submit when idle. The patch fills the keys into the KeybindingsManager Pi
+ * handed the editor: `app.message.followUp` = enter, `tui.input.submit` = enter.
  * It is in-memory only; keybindings.json stays the user's. A user who set
  * either action there keeps their keymap, and the feature stays out of the way.
  *
@@ -18,7 +13,7 @@
  * handles the key itself: after the slash menu completes a command, the same
  * Enter falls through to submit, and that is how one Enter runs `/pi_cc`. The
  * app action is checked first, so outside the menu Enter still goes to the
- * queue; ctrl+enter is in the list for "send now".
+ * queue. Ctrl+Enter is not added to either action.
  *
  * Up (and Ctrl+P where keybindings.json points it at cursor up, as CC's prompt
  * maps it) on the empty editor puts the queued message back for editing — CC's
@@ -62,7 +57,7 @@ import { noteRecall, promptDown } from "./recall.ts";
 
 const INSTALLED = Symbol.for("pi-cc-plugins:cc-keys");
 /** What the interceptor needs of Pi's editor. */
-const REQUIRED = ["handleInput", "isShowingAutocomplete", "getText", "setText", "submitValue"];
+const REQUIRED = ["handleInput", "isShowingAutocomplete", "getText", "setText"];
 
 /** What the patch relies on of Pi's editor: public methods, plus internals. */
 interface CcEditor {
@@ -70,8 +65,6 @@ interface CcEditor {
 	isShowingAutocomplete(): boolean;
 	getText(): string;
 	setText(text: string): void;
-	/** Pi's own submit, bypassing only its backslash + Enter newline fallback. */
-	submitValue(): void;
 	getCursor(): { line: number; col: number };
 	getLines(): string[];
 	/** Is the cursor on the last line? (private in Pi's types) */
@@ -93,7 +86,7 @@ interface Keybindings {
 
 type EditorPrototype = Record<PropertyKey, unknown>;
 
-/** The actions Claude Code's two keys land on, in Pi's names. */
+/** The actions whose bindings are affected by the queue key. */
 const CC_ACTIONS = ["app.message.followUp", "tui.input.submit"] as const;
 
 /**
@@ -103,7 +96,7 @@ const CC_ACTIONS = ["app.message.followUp", "tui.input.submit"] as const;
  */
 const ccBindings = (): Bindings => ({
 	"app.message.followUp": "enter",
-	"tui.input.submit": ["enter", "ctrl+enter"],
+	"tui.input.submit": "enter",
 });
 
 type Bindings = Record<string, unknown>;
@@ -122,7 +115,7 @@ const sameBindings = (left: Bindings, right: Bindings): boolean => {
 };
 
 /**
- * Give the editor CC's pair, unless the user chose a key for either action.
+ * Give the editor the queue key, unless the user chose a key for either action.
  * A manager that still holds what we wrote is left alone; one whose bindings
  * were replaced since (keybindings.json reloaded, say) is reconciled again.
  */
@@ -227,12 +220,6 @@ export function installCcKeys(
 			const before = self.getText();
 			next();
 			if (self.getText() !== before) noteRecall(self, before);
-			return;
-		}
-		// Ctrl+Enter is CC's send-now key, including after a backslash. Pi's
-		// submitValue avoids the editor's backslash + Enter newline fallback.
-		if (!editorOwnsIt && patched.has(self.keybindings ?? {}) && matchesKey(data, "ctrl+enter") && continuesLine(self)) {
-			self.submitValue();
 			return;
 		}
 		// The menu and a disabled submit own Enter, without any app action taking

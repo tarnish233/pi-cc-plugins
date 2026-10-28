@@ -1,6 +1,6 @@
 /**
- * cc-keys.ts: Claude Code's prompt keys in Pi — Enter queues while a run is
- * streaming, Ctrl+Enter sends now, and the slash menu keeps Enter.
+ * cc-keys.ts: Enter queues while a run is streaming, Ctrl+Enter remains
+ * unbound, and the slash menu keeps Enter.
  *
  * The tests drive Pi's real CustomEditor; the follow-up action is wired the way
  * InteractiveMode wires it (queue while streaming, submit when idle).
@@ -112,23 +112,27 @@ test("Pi alone: Enter submits, Alt+Enter queues", () => {
 	assert.equal(editor.getText(), "");
 });
 
-test("patched: Enter queues while a run streams, Ctrl+Enter sends now", () =>
+test("patched: Enter queues while a run streams; Ctrl+Enter does not send", () =>
 	withKeys(() => {
-		const { calls, type, press } = makeEditor();
+		const { editor, manager, calls, type, press } = makeEditor();
 		type("queue me");
 		press(ENTER);
 		assert.deepEqual(calls, { queue: 1, submit: 0 }, "Enter queues");
 
 		type("send me");
 		press(CTRL_ENTER);
-		assert.deepEqual(calls, { queue: 1, submit: 1 }, "Ctrl+Enter submits");
+		assert.deepEqual(calls, { queue: 1, submit: 0 }, "Ctrl+Enter does not submit or queue");
+		assert.equal(editor.getText(), "send me", "the unsent prompt stays in the editor");
+		assert.equal(manager.matches(CTRL_ENTER, "tui.input.submit"), false, "the plugin does not bind Ctrl+Enter");
 	}));
 
-test("patched: when idle, Enter still submits (the queue action falls back)", () =>
+test("patched: when idle, only Enter submits (the queue action falls back)", () =>
 	withKeys(() => {
-		const { calls, type, press, setWorking } = makeEditor({}, { streaming: false });
-		setWorking(false);
+		const { editor, calls, type, press } = makeEditor({}, { streaming: false });
 		type("just send");
+		press(CTRL_ENTER);
+		assert.deepEqual(calls, { queue: 0, submit: 0 }, "Ctrl+Enter stays unbound while idle");
+		assert.equal(editor.getText(), "just send");
 		press(ENTER);
 		assert.deepEqual(calls, { queue: 0, submit: 1 });
 	}));
@@ -142,17 +146,13 @@ test("patched: a backslash before Enter still continues the line instead of send
 		assert.deepEqual(calls, { queue: 0, submit: 0 }, "nothing was sent");
 	}));
 
-test("patched: Ctrl+Enter sends now even when the cursor follows a backslash", () =>
+test("patched: Ctrl+Enter after a backslash no longer bypasses Pi's editor", () =>
 	withKeys(() => {
 		const { editor, calls, type, press } = makeEditor();
-		editor.onSubmit = (text) => {
-			calls.submit++;
-			assert.equal(text, "one\\", "the backslash was sent, not consumed as a newline escape");
-		};
 		type("one\\");
 		press(CTRL_ENTER);
-		assert.deepEqual(calls, { queue: 0, submit: 1 });
-		assert.equal(editor.getText(), "", "the prompt was sent, not continued onto a new line");
+		assert.deepEqual(calls, { queue: 0, submit: 0 });
+		assert.equal(editor.getText(), "one\\", "the prompt was not sent");
 	}));
 
 test("patched: the slash menu keeps Enter — it confirms, then runs the command", () =>
@@ -214,6 +214,15 @@ test("patched: a keymap the user wrote is left alone", () =>
 		type("mine");
 		press(ENTER);
 		assert.deepEqual(calls, { queue: 0, submit: 1 }, "Enter stayed submit");
+		assert.equal("app.message.followUp" in manager.getUserBindings(), false);
+	}));
+
+test("patched: a user-defined Ctrl+Enter binding still submits", () =>
+	withKeys(() => {
+		const { manager, calls, type, press } = makeEditor({ "tui.input.submit": ["enter", "ctrl+enter"] });
+		type("my shortcut");
+		press(CTRL_ENTER);
+		assert.deepEqual(calls, { queue: 0, submit: 1 }, "the user's shortcut wins");
 		assert.equal("app.message.followUp" in manager.getUserBindings(), false);
 	}));
 
