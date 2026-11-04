@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+- Ctrl+P recalls a queued message on an empty prompt by its own byte, so it no longer depends on
+  `keybindings.json` mapping it to `tui.editor.cursorUp`. It still only acts in the narrow state where
+  Up already did: empty prompt and something queued.
+
 ## [0.5.4] - 2026-11-03
 
 ### Added

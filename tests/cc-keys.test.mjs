@@ -46,6 +46,7 @@ const ALT_ENTER = "\x1b\r";
 const UP = "\x1b[A";
 const DOWN = "\x1b[B";
 const ALT_UP = "\x1b[1;3A";
+const CTRL_P = "\x10";
 const CTRL_ENTER = "\x1b[13;5u";
 
 const identity = (text) => text;
@@ -301,6 +302,72 @@ test("patched: Up with text in the editor never restores the queue", () => {
 		press(UP);
 		assert.equal(restores, 0);
 		assert.equal(editor.getText(), "typing");
+	} finally {
+		uninstall();
+	}
+});
+
+test("patched: Ctrl+P on the empty editor restores the queue without a keymap entry", () => {
+	const { editor, press } = makeEditor();
+	let restores = 0;
+	editor.onAction("app.message.dequeue", () => {
+		restores++;
+		editor.setText("queued message");
+	});
+	const uninstall = keys.installCcKeys(() => true);
+	try {
+		// CC's prompt key, on a keymap that never copied it into cursor up.
+		assert.equal(editor.keybindings.matches(CTRL_P, "tui.editor.cursorUp"), false);
+		press(CTRL_P);
+		assert.equal(restores, 1, "the dequeue action ran");
+		assert.equal(editor.getText(), "queued message");
+	} finally {
+		uninstall();
+	}
+});
+
+test("patched: Ctrl+P with nothing queued is left to its own binding", () => {
+	const { editor, press } = makeEditor();
+	let restores = 0;
+	editor.onAction("app.message.dequeue", () => {
+		restores++;
+	});
+	const uninstall = keys.installCcKeys(() => false);
+	try {
+		press(CTRL_P);
+		assert.equal(restores, 0);
+		assert.equal(editor.getText(), "");
+	} finally {
+		uninstall();
+	}
+});
+
+test("patched: Ctrl+P with text in the editor never restores the queue", () => {
+	const { editor, type, press } = makeEditor();
+	let restores = 0;
+	editor.onAction("app.message.dequeue", () => {
+		restores++;
+	});
+	const uninstall = keys.installCcKeys(() => true);
+	try {
+		type("typing");
+		press(CTRL_P);
+		assert.equal(restores, 0);
+		assert.equal(editor.getText(), "typing");
+	} finally {
+		uninstall();
+	}
+});
+
+test("patched: Down after a Ctrl+P recall clears the prompt", () => {
+	const { editor, press } = makeEditor();
+	editor.onAction("app.message.dequeue", () => editor.setText("queued message"));
+	const uninstall = keys.installCcKeys(() => true);
+	try {
+		press(CTRL_P);
+		assert.equal(editor.getText(), "queued message");
+		press(DOWN);
+		assert.equal(editor.getText(), "");
 	} finally {
 		uninstall();
 	}

@@ -15,14 +15,17 @@
  * app action is checked first, so outside the menu Enter still goes to the
  * queue. Ctrl+Enter is not added to either action.
  *
- * Up (and Ctrl+P where keybindings.json points it at cursor up, as CC's prompt
- * maps it) on the empty editor puts the queued message back for editing — CC's
- * "Press up to select a queued message to edit", for the single-message case
- * this feature is for. Pi already has that in its dequeue action, so the patch
- * only routes the key there when the session reports a pending message; with
- * nothing queued, Up keeps browsing history. The dequeue action has no
- * take-one API, so several queued messages come back together; there is no
- * per-message picker, by design.
+ * Up (and Ctrl+P, which CC's prompt maps to up) on the empty editor puts the
+ * queued message back for editing — CC's "Press up to select a queued message
+ * to edit", for the single-message case this feature is for. Pi already has
+ * that in its dequeue action, so the patch only routes the key there when the
+ * session reports a pending message; with nothing queued, Up keeps browsing
+ * history and Ctrl+P keeps whatever else it is bound to.
+ *
+ * Ctrl+P is recognized by its byte, not through `tui.editor.cursorUp`, so a
+ * prompt that never copied CC's keymap still gets the CC behaviour. It only
+ * applies in the same narrow state as Up — empty prompt, something queued —
+ * where Pi would otherwise cycle models.
  *
  * The restored text goes in with setText, so Pi's own Down only moves the
  * cursor over it. Down / Ctrl+N on its last line puts the prompt back as it
@@ -151,9 +154,14 @@ function matchesAny(editor: CcEditor, data: string, actions: string[]): boolean 
 	return actions.some((action) => keys.matches?.(data, action));
 }
 
-/** The keys CC's prompt treats as "up on the prompt": cursor up, or history. */
+/**
+ * The keys CC's prompt treats as "up on the prompt": cursor up, history, and
+ * Ctrl+P. Ctrl+P is checked as a byte rather than through the keymap: CC binds
+ * it there itself, and waiting for keybindings.json to copy that left the key
+ * dead for everyone else.
+ */
 const isUpKey = (editor: CcEditor, data: string): boolean =>
-	matchesAny(editor, data, ["tui.editor.cursorUp", "tui.editor.historyPrevious"]);
+	matchesKey(data, "ctrl+p") || matchesAny(editor, data, ["tui.editor.cursorUp", "tui.editor.historyPrevious"]);
 
 const isCcKey = (editor: CcEditor, data: string): boolean => matchesAny(editor, data, [...CC_ACTIONS]);
 
