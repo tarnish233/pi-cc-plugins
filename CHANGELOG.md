@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-11-06
+
 ### Fixed
 - Keep Pi's native visual-line navigation inside recalled prompt history: cursor Down and its aliases
   no longer jump straight to the next query before reaching the last visual line.
