@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+- Keep Pi's native visual-line navigation inside recalled prompt history: cursor Down and its aliases
+  no longer jump straight to the next query before reaching the last visual line.
+- Preserve dedicated history-action precedence, including keys also bound to cursor Down.
+- Add real-editor regression tests for multi-line and soft-wrapped history, terminal resize, cursor
+  aliases, draft restoration, autocomplete, and both prompt interceptors together or separately.
+
 ## [0.5.5] - 2026-11-04
 
 ### Changed

@@ -18,8 +18,8 @@ ln -sfn "$PWD" ~/.pi/agent/extensions/pi-cc-plugins
 
 | 功能 | 说明 | 扩展 |
 | --- | --- | --- |
-| CC 键 | Enter 在 Pi 干活时排队、空闲时照常发送；有排队时 ↑ / Ctrl+P 放回输入框，↓ / Ctrl+N 清空；不提供 Ctrl+Enter 直发 | `cc-keys.ts` |
-| Ctrl+C 找回 | Ctrl+C 清掉的内容，在空输入框按 ↑ / Ctrl+P 原样放回，↓ / Ctrl+N 清空；没找回的在下次发送时进 ↑ 历史 | `draft.ts` |
+| CC 键 | Enter 在 Pi 干活时排队、空闲时照常发送；有排队时 ↑ / Ctrl+P 放回输入框，最后一个可视行上 ↓ / Ctrl+N 收回；不提供 Ctrl+Enter 直发 | `cc-keys.ts` |
+| Ctrl+C 找回 | Ctrl+C 清掉的内容，在空输入框按 ↑ / Ctrl+P 原样放回，最后一个可视行上 ↓ / Ctrl+N 收回；没找回的在下次发送时进 ↑ 历史 | `draft.ts` |
 | 回合摘要 | 每轮结束一行：`Ran 3 commands, read 2 files · Completed for 42s · done 6:51 PM`，中断的写 `Interrupted for 2s · …` | `turn-summary.ts` |
 
 包只有一个入口 `index.ts`，在 `pi config` 和启动横幅里显示为一行 `pi-cc-plugins`，和 pi-cc-loop 一样；`pi config` 对它整包启停。三个功能各自在自己的模块里，互不依赖。
@@ -42,7 +42,7 @@ ln -sfn "$PWD" ~/.pi/agent/extensions/pi-cc-plugins
 
 - Ctrl+C 清空输入框前先把内容存下来，粘贴内容一起存；空白内容不存，正在浏览的一条没改过的历史也不存（它本来就在历史里）。
 - 输入框为空时按 ↑ 原样放回，光标在末尾，只放回一次。"↑" 指所有绑定到 cursor up 或 history previous 的键：在 `keybindings.json` 里把 Ctrl+P 绑上去，Ctrl+P 也算。
-- 放回后按 ↓ / Ctrl+N 回到按 ↑ 之前的样子（通常是清空），一下就行：输入框里放回的内容不算历史条目，Pi 自己的 ↓ 只会移动光标，所以由本扩展把它收回。放回的内容改动过（或已经发送）后，↓ 就恢复普通行为。
+- 放回后，在最后一个可视行按 ↓ / Ctrl+N 回到按 ↑ 之前的样子（通常是清空）：放回的内容不算历史条目，Pi 自己的 ↓ 只会移动光标，所以由本扩展在边界把它收回。多行或自动折行的文本，内部上下键仍然逐行移动。放回的内容改动过（或已经发送）后，↓ 就恢复普通行为。
 - 没放回的内容，下次发送消息时先于这条消息进入 ↑ 历史；再按一次 Ctrl+C 时，上一份也会先进历史。
 - 只在输入框有焦点时生效，选择器、对话框里的 ↑ 不受影响。连按两次 Ctrl+C 退出，和原来一样。
 
@@ -77,8 +77,9 @@ Pi 没有提供这个钩子：`ctrl+c` 是保留键，扩展不能注册；在 `
 | Enter | Pi 正在干活时**排队**，这一轮彻底结束后再发（Pi 的 follow-up）；空闲时就是正常发送 |
 | Ctrl+Enter | 本包不绑定；终端能区分该键且未自行设置时不发送，也不会影响已经排队的消息 |
 | ↑ / Ctrl+P（输入框为空时） | 把排队的那一条放回输入框重新编辑；没有排队时照旧翻历史 |
-| ↓ / Ctrl+N（放回的文本 / 翻出的历史上） | 一下回到按 ↑ 之前的样子（通常是清空） |
-| Alt+Up | Pi 原有的 dequeue，**仍然可用、没改键**：不管有没有排队都调用它（空时提示 No queued messages to restore）；放回后 ↓ 同样清空 |
+| ↓ / Ctrl+N（放回的文本上） | 最后一个可视行上回到按 ↑ 之前的样子（通常是清空）；内部逐行移动 |
+| ↑ / ↓（翻出的历史上） | 先在当前 query 内逐行移动；首个／末个可视行上才切换历史 query |
+| Alt+Up | Pi 原有的 dequeue，**仍然可用、没改键**：不管有没有排队都调用它（空时提示 No queued messages to restore）；放回后最后一个可视行上 ↓ 同样收回 |
 
 Pi 默认是 Enter 立即插入、Alt+Enter 排队。本功能把 `app.message.followUp` 绑定到 `enter`
 （干活时排队，空闲时照常发送），保留 `tui.input.submit` = `enter` 供编辑器处理斜杠命令等情况；不再给它增加 `ctrl+enter`。
@@ -86,14 +87,16 @@ Pi 默认是 Enter 立即插入、Alt+Enter 排队。本功能把 `app.message.f
 - **只改内存里的键位**，不动 `keybindings.json`。你自己在 `keybindings.json` 里给这两个动作任意一个设了键，本功能就整个让位，按你的来。
 - **斜杠菜单、禁用提交和行尾反斜杠保留 Enter**：菜单打开时 Enter 先确认补全，命令补全后同一下 Enter 就执行，和 Pi 原样一致，不会被排队动作抢走（Pi 把应用级键位放在编辑器自己的按键处理之前，所以这里在补丁里让它们先处理）；「禁用提交」的编辑器里 Enter 只确认补全、不提交；输入框里光标前是 `\` 时，Enter 按 Pi 的原样换行而不发送（给发不出 Shift+Enter 的终端用）。
 - **↑ / Ctrl+P 只在真有排队时接管**：补丁先问会话有没有待发消息（`ctx.hasPendingMessages()`），有才调用 Pi 自己的 dequeue；没有时 ↑ 照旧翻历史。Ctrl+P 按字节识别，不要求 `keybindings.json` 把它指到 `tui.editor.cursorUp` —— 它只在和 ↑ 相同的窄状态（输入框为空、确实有排队）里接管，那时 Pi 原本会拿它切模型。`app.message.dequeue` 这个动作还是原来的 Alt+Up（Pi 的提示 “Option+Up to edit all queued messages” 也是它），本功能没有换掉、也没有解绑 —— ↑ / Ctrl+P 只是多了一条“有排队时”的路。
-- **↓ / Ctrl+N 一下回到草稿**：放回用的是 `setText`，Pi 的 ↓ 只在翻历史时清空输入框，所以放回的内容会留在框里；而翻历史时，Pi 的 ↓ 又要等光标走到最后一个可视行——长提示或折行提示要按好几下才清空（短提示一下就空，看起来时灵时不灵）。补丁记住放回前的内容，并在翻历史时直接调用 Pi 自己的 `navigateHistory(1)`：一下回到按 ↑ 之前的样子。文本改动过就不再介入。排队的消息本来就进了 ↑ 历史，收回后仍能按 ↑ 找回来。
+- **↓ / Ctrl+N 在边界回到草稿**：补丁只记住本包放回的草稿或排队消息，在最后一个可视行上收回；文本改动过就不再介入。排队的消息本来就进了 ↑ 历史，收回后仍能按 ↑ 找回来。
+- **历史 query 保留 Pi 原生多行编辑**：不再强制调用 `navigateHistory(1)`。在历史浏览状态下，↑ / ↓ 以及绑定到 `tui.editor.cursorUp` / `cursorDown` 的 Ctrl+P / Ctrl+N，先在当前 query 的可视行间移动，到首个／末个可视行后才翻历史；真实换行、自动折行、终端缩放都按 Pi 的布局处理。↑ 召回历史后的光标仍在第一行开头，所以此时再按 ↑ 会翻更旧的 query，按 ↓ 则进入下一行。真正改动文字后，Pi 会结束历史浏览，按普通草稿编辑；普通草稿需要到首个可视行的行首，才能用 ↑ 再进入历史。
+- **独立历史快捷键不受行边界限制**：绑定到 `tui.editor.historyPrevious` / `historyNext` 的键继续直接翻整条 query；同一个键同时绑定到光标移动和独立历史动作时，独立历史动作优先。本包不替你修改这些键位。
 - **只做单条排队**：这个功能只考虑"干活时发一条、↑ 拿回来改"这一种用法。Pi 的 dequeue 没有"只取一条"的接口，所以万一真排了多条，↑ 会把它们一次性全部放回输入框；不提供 CC 那种逐条选择，也不打算做。
 - **终端按键限制**：如果终端把 Ctrl+Enter 报告成普通 Enter，Pi 无法区分，两者都会按 Enter 的规则处理；本包只是不再主动绑定可区分的 Ctrl+Enter。
 - 关掉：`/pi_cc keys off`，或 `PI_CC_KEYS=0`，或直接删掉 pi-cc-plugins。
 
 ## 兼容性
 
-Pi 1.3.0 / 1.4.0。
+本次修复的完整测试在 Pi 1.4.0 / 1.5.0 通过。Pi 1.3.0 是此前支持的版本，本次未重新验证。
 
 ## 本地开发
 
@@ -104,6 +107,7 @@ npx --yes -p typescript@5.9.3 tsc --noEmit -p tsconfig.json
 
 测试加载真实的 Pi 模块：Ctrl+C 找回和 CC 键都直接对 Pi 的 `CustomEditor` 模拟按键。
 测别的 Pi 版本时，把 `PI_AGENT_DIR` 指到只装了那个版本的目录（`<dir>/install/releases/<version>`）。
+类型检查前，将 `tsconfig.json` 的宿主包路径与 `typeRoots` 指向实际的 Pi 安装；不要为此安装第二份 Pi。
 
 ### 缓存约束
 
@@ -115,7 +119,7 @@ npx --yes -p typescript@5.9.3 tsc --noEmit -p tsconfig.json
 
 - Ctrl+C 找回：CC 把没找回的内容另存一个列表（本会话最多 10 条），按清空时间插进 ↑ 历史；这里直接写进 Pi 输入框的历史，和发送过的消息放在一起（Pi 最多 100 条）。CC 在查看子 agent 时不写历史，Pi 没有这个视图。
 - CC 键：只对齐"单条排队"这一种用法——CC 的排队在有多条时按 ↑ 可以逐条选，这里不做选择器；那种情况下 ↑ / Ctrl+P 走 Pi 的 dequeue，会把排队的消息一起放回输入框，和 Alt+Up 相同。CC 的 `Ctrl+X Enter` 显式排队这里没绑。
-- 排队的消息或翻出的历史按 ↓ 一下清空（Pi 原生：排队消息用 `setText` 放回，不算历史条目，↓ 只移动光标；翻历史时 ↓ 要等光标走到最后一个可视行，长提示要多按几下）：CC 的提示框在这一下就回到草稿。
+- 多行编辑优先：历史 query 的上下键保留 Pi 原生行内导航，仅在首个／末个可视行翻历史。排队消息或 Ctrl+C 草稿用 `setText` 放回后，本包只在最后一个可视行上用 ↓ 收回，避免抢走内部逐行移动。
 - 双击 Esc：CC 双击 Esc 也会清空输入框，并写进持久历史；Pi 的 Esc 不清空输入框（bash 模式除外），空输入框双击 Esc 按设置打开 `/tree` 或 `/fork`，所以不在本包范围。
 - 回合摘要：CC 的耗时行是 `✻ Worked for 42s · done 6:51 PM`，整行 dim，动词从 Baked、Brewed、Worked 等词里选，和工具统计分开显示，按 Esc 中断的回合不显示；不是当天的会带上星期或日期。
   这里按 agent-summary 的引用块格式把两者合成一行：正常回合动词固定为 Completed，中断的写 Interrupted、出错的写 Failed，时刻固定为 `h:mm AM/PM`，中断的回合也显示；用时和时刻的数字上 CC 的橙色（AM/PM 后缀不上；CC 那一行整行 dim，不上色）。

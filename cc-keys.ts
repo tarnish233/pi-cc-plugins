@@ -31,10 +31,9 @@
  * cursor over it. Down / Ctrl+N on its last line puts the prompt back as it
  * was (recall.ts), for our Up and for Pi's dequeue key (Alt+Up), which the
  * patch watches for the same reason. The message is in ↑ history — Pi adds it
- * when it is queued — so the Down does not lose it. The same goes for a
- * prompt recalled from the history: Pi's Down walks the cursor to the last
- * visual line first, so a long or multi-line prompt took several presses;
- * recall.ts ends the browsing in one.
+ * when it is queued — so the Down does not lose it. Native prompt history
+ * stays with Pi: arrows move between visual lines first, then browse at the
+ * boundaries. Dedicated history actions keep their own precedence.
  *
  * Three editor states need Enter more than the queue action does:
  *

@@ -115,14 +115,17 @@ test("Down walks a multi-line draft to its last line before clearing it", async 
 	});
 });
 
-test("Down from a multi-line history entry goes back to the draft in one press", async () => {
+test("Down from a multi-line history entry reaches the last line before returning to the draft", async () => {
 	await withDraft(() => {
 		const { editor, press } = makeEditor();
 		editor.addToHistory("one\ntwo");
 		press(UP);
 		assert.equal(editor.getText(), "one\ntwo");
 		press(DOWN);
-		assert.equal(editor.getText(), "", "Pi walks to the last visual line first; the prompt goes back at once");
+		assert.equal(editor.getText(), "one\ntwo", "the first Down stays in the current query");
+		assert.deepEqual(editor.getCursor(), { line: 1, col: 0 });
+		press(DOWN);
+		assert.equal(editor.getText(), "", "only Down on the last visual line returns to the draft");
 	});
 });
 

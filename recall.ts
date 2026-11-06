@@ -1,17 +1,14 @@
 /**
- * Down on the prompt, as Claude Code's prompt does: back to the draft.
+ * Down on the last visual line of a recalled prompt: back to the draft.
  *
- * Two texts need the help. A text this package put back with setText — the
- * draft Ctrl+C kept, a queued message Up brought back — is not a history
- * entry, so Pi's Down only moves the cursor over it and the text stays. And
- * while Pi browses its history, its Down waits for the cursor to reach the
- * last visual line: on a long or multi-line prompt the first presses only walk
- * down, and the prompt comes back a press later. Here both go back at once.
+ * A text this package put back with setText — the draft Ctrl+C kept, a queued
+ * message Up brought back — is not a history entry, so Pi's Down would leave
+ * it in the editor. Only that unedited text needs the boundary restore here.
  *
- * History is left alone: a draft does not reach ↑ history before it is sent.
- * The put-back record is forgotten as soon as the text changes — an edit, a
- * send, anything but us — and an edited text is the editor's again (editing
- * ends browsing). The slash-command / file menu keeps Down while it is open.
+ * Prompt history stays Pi's: arrows move through visual lines before browsing
+ * older/newer entries at the boundaries; dedicated history actions always
+ * browse. The put-back record is forgotten when the text changes, and the
+ * slash-command / file menu keeps Down while it is open.
  */
 
 /** What a put-back needs of Pi's editor. */
@@ -22,10 +19,8 @@ export interface RecallEditor {
 	isOnLastVisualLine?(): boolean;
 	/** The slash-command / file menu owns Down while it is open. */
 	isShowingAutocomplete?(): boolean;
-	/** -1 unless browsing history, which ends on Down (private in Pi's types). */
+	/** -1 unless browsing history, whose navigation stays with Pi (private in its types). */
 	historyIndex?: number;
-	/** Pi's own history step; private in its types. */
-	navigateHistory?(direction: number): void;
 }
 
 interface Keys {
@@ -52,26 +47,27 @@ function onLastLine(editor: RecallEditor): boolean {
 	}
 }
 
-/** Down / Ctrl+N: the editor's "next" key. */
+/** Cursor Down / its aliases; an overlapping dedicated history binding wins. */
 function isDown(keys: Keys | undefined, data: string): boolean {
-	return keys?.matches?.(data, "tui.editor.cursorDown") === true || keys?.matches?.(data, "tui.editor.historyNext") === true;
+	return keys?.matches?.(data, "tui.editor.cursorDown") === true
+		&& keys?.matches?.(data, "tui.editor.historyPrevious") !== true
+		&& keys?.matches?.(data, "tui.editor.historyNext") !== true;
 }
 
 /**
- * Down / Ctrl+N on the prompt: go back to what the editor held before Up, the
- * way the end of the history does — one press, whatever the text's length.
- * Every other key, and a text the user edited since, goes on to `next`.
+ * Restore an unedited text this package recalled, only on its last visual line.
+ * Native history, dedicated history actions, and every other key go to `next`.
  */
 export function promptDown(editor: RecallEditor, data: string, keys: Keys | undefined, next: () => void): void {
 	if (!isDown(keys, data) || editor.isShowingAutocomplete?.() === true) {
 		next();
 		return;
 	}
-	// Browsing history: the newer entry, or back to the draft.
+	// Let Pi move within the query and browse only at visual boundaries.
+	// Even a matching put-back record must not replace Pi's captured history draft.
 	const browsing = typeof editor.historyIndex === "number" && editor.historyIndex !== -1;
 	if (browsing) {
-		if (typeof editor.navigateHistory === "function") editor.navigateHistory(1);
-		else next();
+		next();
 		return;
 	}
 	const held = recalled.get(editor);

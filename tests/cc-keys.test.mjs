@@ -373,6 +373,26 @@ test("patched: Down after a Ctrl+P recall clears the prompt", () => {
 	}
 });
 
+test("patched: Down walks a multi-line queued recall before clearing it at the last line", () => {
+	const { editor, press } = makeEditor();
+	editor.onAction("app.message.dequeue", () => editor.setText("one\ntwo\nthree"));
+	const uninstall = keys.installCcKeys(() => true);
+	try {
+		press(UP, UP, UP); // restore at the end, then move up two lines
+		assert.equal(editor.getCursor().line, 0);
+		press(DOWN);
+		assert.equal(editor.getText(), "one\ntwo\nthree");
+		assert.equal(editor.getCursor().line, 1);
+		press(DOWN);
+		assert.equal(editor.getText(), "one\ntwo\nthree");
+		assert.equal(editor.getCursor().line, 2);
+		press(DOWN);
+		assert.equal(editor.getText(), "", "the boundary still clears an unedited queued recall");
+	} finally {
+		uninstall();
+	}
+});
+
 test("patched: Down after a recall puts the empty prompt back, as after browsing history", () => {
 	for (const [name, recall] of [
 		["Up", UP],
@@ -423,7 +443,7 @@ test("patched: Down leaves a restored message that was edited", () => {
 	}
 });
 
-test("patched: Down ends a multi-line history recall in one press", () => {
+test("patched: Down moves through a multi-line history recall before leaving it", () => {
 	const { editor, press } = makeEditor();
 	editor.addToHistory("one\ntwo");
 	const uninstall = keys.installCcKeys(() => false);
@@ -431,7 +451,10 @@ test("patched: Down ends a multi-line history recall in one press", () => {
 		press(UP);
 		assert.equal(editor.getText(), "one\ntwo");
 		press(DOWN);
-		assert.equal(editor.getText(), "");
+		assert.equal(editor.getText(), "one\ntwo");
+		assert.deepEqual(editor.getCursor(), { line: 1, col: 0 });
+		press(DOWN);
+		assert.equal(editor.getText(), "", "only Down on the last visual line leaves history");
 	} finally {
 		uninstall();
 	}
