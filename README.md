@@ -102,12 +102,12 @@ Pi 默认是 Enter 立即插入、Alt+Enter 排队。本功能把 `app.message.f
 
 ```bash
 node --test tests/*.test.mjs
-npx --yes -p typescript@5.9.3 tsc --noEmit -p tsconfig.json
+npm run typecheck
 ```
 
 测试加载真实的 Pi 模块：Ctrl+C 找回和 CC 键都直接对 Pi 的 `CustomEditor` 模拟按键。
 测别的 Pi 版本时，把 `PI_AGENT_DIR` 指到只装了那个版本的目录（`<dir>/install/releases/<version>`）。
-类型检查前，将 `tsconfig.json` 的宿主包路径与 `typeRoots` 指向实际的 Pi 安装；不要为此安装第二份 Pi。
+类型检查使用本地 TypeScript 开发依赖，并自动定位本地 peer dependencies 或当前安装的 Pi release；不要为此安装第二份 Pi。可用 `PI_AGENT_DIR` 选择隔离安装，用 `PI_TYPESCRIPT_PATH` 指向已有的 `typescript/lib/typescript.js`。
 
 ### 缓存约束
 

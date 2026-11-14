@@ -1,8 +1,8 @@
 /**
  * index.ts registers /pi_cc for this package: the shared settings command
  * from settings.ts (the same bytes as in pi-cc-loop and pi-cc-monitor). Only
- * the first pi-cc package to load gets the command, so a session never sees
- * /pi_cc:1 and /pi_cc:2.
+ * the first pi-cc package to load in a session gets the command, so that
+ * session never sees /pi_cc:1 and /pi_cc:2. Independent sessions each get one.
  */
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -14,7 +14,6 @@ import { fakePi, loadModule } from "./helpers.mjs";
 const index = await loadModule("index.ts");
 const settings = await loadModule("settings.ts");
 const config = await loadModule("config.ts");
-const claim = Symbol.for("pi-cc:slash-command");
 
 function withTempConfig(body) {
 	const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pi-cc-plugins-")), "pi-cc.json");
@@ -44,25 +43,26 @@ function panelCtx(notifications) {
 	return { ctx, panel: () => panel };
 }
 
-test("the package registers /pi_cc; a later pi-cc package leaves it alone, shutdown re-opens the race", async () => {
-	globalThis[claim] = undefined;
-	try {
-		const host = fakePi();
-		index.default(host.pi);
-		assert.ok(host.commands.has("pi_cc"), "/pi_cc is registered");
-		assert.deepEqual(host.calls, [], "nothing beyond handlers, entries, renderers and commands");
+test("/pi_cc is single per shared runtime, independent per session, and released at shutdown", async () => {
+	const host = fakePi();
+	index.default(host.pi);
+	assert.ok(host.commands.has("pi_cc"), "/pi_cc is registered");
+	assert.deepEqual(host.calls, [], "nothing beyond handlers, entries, renderers and commands");
 
-		const other = fakePi();
-		settings.registerPiCcCommand(other.pi, "pi-cc-loop");
-		assert.ok(!other.commands.has("pi_cc"), "the claim keeps the command single");
+	const independent = fakePi();
+	settings.registerPiCcCommand(independent.pi, "pi-cc-loop");
+	assert.ok(independent.commands.has("pi_cc"), "another session is not blocked by this runtime");
 
-		await host.emit("session_shutdown", {}, { mode: "tui", hasUI: false });
-		const third = fakePi();
-		settings.registerPiCcCommand(third.pi, "pi-cc-loop");
-		assert.ok(third.commands.has("pi_cc"), "the claim is released at shutdown");
-	} finally {
-		globalThis[claim] = undefined;
-	}
+	const other = fakePi();
+	other.pi.events = host.pi.events;
+	settings.registerPiCcCommand(other.pi, "pi-cc-loop");
+	assert.ok(!other.commands.has("pi_cc"), "the shared-runtime claim keeps the command single");
+
+	await host.emit("session_shutdown", {}, { mode: "tui", hasUI: false });
+	const third = fakePi();
+	third.pi.events = host.pi.events;
+	settings.registerPiCcCommand(third.pi, "pi-cc-loop");
+	assert.ok(third.commands.has("pi_cc"), "the shared-runtime claim is released at shutdown");
 });
 
 test("/pi_cc footer on|off writes the shared pi-cc.json and tells the other packages", async () => {
@@ -95,19 +95,21 @@ test("a bare /pi_cc opens the panel; outside the TUI it prints the summary", asy
 	});
 });
 
-test("the pi-cc-plugins toggles have their own page in the panel, one Tab along", async () => {
+test("standalone pi-cc-plugins shows only its own settings, with no irrelevant page switching", async () => {
 	await withTempConfig(async () => {
 		const host = fakePi();
 		index.default(host.pi);
 		const notifications = [];
 		const { ctx, panel } = panelCtx(notifications);
 		const opened = host.commands.get("pi_cc").handler("", ctx);
-		assert.doesNotMatch(panel().render(100).join("\n"), /Draft recall/, "the first page is Loop & Monitor");
+		const screen = () => panel().render(100).join("\n");
+		assert.match(screen(), /→ Draft recall +on/);
+		assert.match(screen(), /Turn summary +on/);
+		assert.match(screen(), /CC keys +on/);
+		assert.doesNotMatch(screen(), /Loop & Monitor|Compact|Message style|CC compaction/);
+		assert.doesNotMatch(screen(), /Tab\/Shift\+Tab/);
 		panel().handleInput("\t");
-		assert.match(panel().render(100).join("\n"), /Loop & Monitor \/ Plugins \/ Compact/);
-		assert.match(panel().render(100).join("\n"), /→ Draft recall +on/);
-		assert.match(panel().render(100).join("\n"), /Turn summary +on/);
-		assert.match(panel().render(100).join("\n"), /CC keys +on/);
+		assert.match(screen(), /→ Draft recall +on/, "Tab does not switch to an unloaded package");
 		panel().handleInput("\x1b");
 		await opened;
 	});

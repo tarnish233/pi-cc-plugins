@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.5.8] - 2026-11-14
+
+### Changed
+- Show only loaded-package settings pages in `/pi_cc`; standalone Plugins no longer displays irrelevant Loop/Monitor or Compaction controls. Text commands still preconfigure unloaded packages and preserve unrelated values.
+- Scope shared command ownership and capabilities to each Pi runtime, including safe same-package reloads and mixed-version registry upgrades. Prompt editing and turn summaries are unchanged.
+- Replace hard-coded Pi 1.3.0 typecheck paths with portable local peer/Pi release discovery and optional `PI_AGENT_DIR` / `PI_TYPESCRIPT_PATH` overrides.
+
 ## [0.5.7] - 2026-11-14
 
 ### Changed
