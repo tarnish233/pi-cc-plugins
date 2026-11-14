@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-11-14
+
+### Changed
+- Synchronize shared pi-cc settings with Monitor and Loop: normalize panel/CLI values while retaining boolean storage and environment override behavior.
+- Update the shared footer description to the count-first labels (`1 loop`, `2 monitors`); prompt editing and tool/turn summaries are unchanged.
+
 ## [0.5.6] - 2026-11-06
 
 ### Fixed
