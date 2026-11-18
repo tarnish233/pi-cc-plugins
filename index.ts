@@ -28,8 +28,11 @@ export default function piCcPlugins(pi: ExtensionAPI): void {
 	turnSummary(pi);
 	pi.events.on(CONFIG_CHANNEL, () => {
 		invalidateConfig();
-		redraft();
-		rekey();
+		// Re-seat both, draft first: re-enabling one feature alone would push its
+		// interceptor after the other (or into a newer chain under an external
+		// wrapper), putting the queued message before the held draft on Up.
+		redraft(true);
+		rekey(true);
 	});
 	// The shared pi-cc settings and their /pi_cc command. The first pi-cc
 	// package to load registers it; this one re-claims its own claim on /reload.

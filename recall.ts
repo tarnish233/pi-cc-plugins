@@ -11,6 +11,8 @@
  * slash-command / file menu keeps Down while it is open.
  */
 
+import { matchesKey } from "@earendil-works/pi-tui";
+
 /** What a put-back needs of Pi's editor. */
 export interface RecallEditor {
 	getText(): string;
@@ -21,6 +23,15 @@ export interface RecallEditor {
 	isShowingAutocomplete?(): boolean;
 	/** -1 unless browsing history, whose navigation stays with Pi (private in its types). */
 	historyIndex?: number;
+	/** The texts behind [paste #n] markers (private in Pi's types). */
+	pastes?: Map<number, string>;
+	pasteCounter?: number;
+}
+
+/** The paste map a collapsed draft held, so setText can be undone whole. */
+export interface PasteSnapshot {
+	pastes: Map<number, string>;
+	pasteCounter?: number;
 }
 
 interface Keys {
@@ -28,13 +39,13 @@ interface Keys {
 }
 
 /** The text Up put back, and what the editor held before it. */
-const recalled = new WeakMap<object, { text: string; before: string }>();
+const recalled = new WeakMap<object, { text: string; before: string; beforePastes?: PasteSnapshot }>();
 
 /** Remember the text just put into the editor, and the text it replaced. */
-export function noteRecall(editor: RecallEditor, before: string): void {
+export function noteRecall(editor: RecallEditor, before: string, beforePastes?: PasteSnapshot): void {
 	const text = editor.getText();
 	if (text === "" || text === before) recalled.delete(editor);
-	else recalled.set(editor, { text, before });
+	else recalled.set(editor, { text, before, beforePastes });
 }
 
 /** Is the cursor on the last line, where Down would leave the editor? */
@@ -49,7 +60,10 @@ function onLastLine(editor: RecallEditor): boolean {
 
 /** Cursor Down / its aliases; an overlapping dedicated history binding wins. */
 function isDown(keys: Keys | undefined, data: string): boolean {
-	return keys?.matches?.(data, "tui.editor.cursorDown") === true
+	// Ctrl+N by byte, as cc-keys takes Ctrl+P: CC's prompt maps it to down, but
+	// Pi's default cursorDown does not. Only the recall boundary below uses it.
+	const down = keys?.matches?.(data, "tui.editor.cursorDown") === true || matchesKey(data, "ctrl+n");
+	return down
 		&& keys?.matches?.(data, "tui.editor.historyPrevious") !== true
 		&& keys?.matches?.(data, "tui.editor.historyNext") !== true;
 }
@@ -59,6 +73,10 @@ function isDown(keys: Keys | undefined, data: string): boolean {
  * Native history, dedicated history actions, and every other key go to `next`.
  */
 export function promptDown(editor: RecallEditor, data: string, keys: Keys | undefined, next: () => void): void {
+	// Forget a record on any key once its text is gone — sent, cleared, or typed
+	// over — so a later identical draft is not mistaken for the recall.
+	const record = recalled.get(editor);
+	if (record && editor.getText() !== record.text) recalled.delete(editor);
 	if (!isDown(keys, data) || editor.isShowingAutocomplete?.() === true) {
 		next();
 		return;
@@ -75,15 +93,15 @@ export function promptDown(editor: RecallEditor, data: string, keys: Keys | unde
 		next();
 		return;
 	}
-	if (editor.getText() !== held.text) {
-		recalled.delete(editor);
-		next();
-		return;
-	}
 	if (!onLastLine(editor)) {
 		next();
 		return;
 	}
 	recalled.delete(editor);
 	editor.setText(held.before);
+	// setText drops the paste map; put back what the markers stood for.
+	if (held.beforePastes) {
+		editor.pastes = new Map(held.beforePastes.pastes);
+		editor.pasteCounter = held.beforePastes.pasteCounter;
+	}
 }

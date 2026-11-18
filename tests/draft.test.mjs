@@ -204,6 +204,22 @@ test("a draft not brought back goes into history just before the next prompt sen
 	});
 });
 
+test("a sent draft does not clear a later identical draft on Down", async () => {
+	await withDraft(() => {
+		const { editor, type, press } = makeEditor();
+		type("继续");
+		press(CTRL_C, UP);
+		assert.equal(editor.getText(), "继续");
+		press(ENTER);
+		assert.equal(editor.getText(), "", "the recalled draft was sent");
+		assert.deepEqual(editor.history, ["继续"]);
+		type("继续");
+		assert.equal(editor.getText(), "继续");
+		press(DOWN);
+		assert.equal(editor.getText(), "继续", "the new unsent draft survives Down");
+	});
+});
+
 test("a second Ctrl+C sends the older draft to history first", async () => {
 	await withDraft(() => {
 		const { editor, type, press } = makeEditor();

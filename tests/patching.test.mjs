@@ -131,6 +131,79 @@ test("turning the draft off leaves the CC keys working", async () => {
 	});
 });
 
+test("draft off/on through the config bus keeps the cleared draft before the queued message", async () => {
+	await withConfig({}, async () => {
+		const host = fakePi();
+		index.default(host.pi);
+		// A pending message makes cc-keys' Up recall compete with the held draft.
+		await host.emit("session_start", { reason: "startup" }, { ...TUI_CTX, hasPendingMessages: () => true });
+		try {
+			config.saveConfig({ draft: false });
+			host.pi.events.emit("pi-cc:config", config.loadConfig());
+			config.saveConfig({ draft: true });
+			host.pi.events.emit("pi-cc:config", config.loadConfig());
+			const ui = makeEditor();
+			ui.editor.onAction("app.message.dequeue", () => ui.editor.setText("queued message"));
+			ui.type("cleared draft");
+			ui.press(CTRL_C, UP);
+			assert.equal(ui.editor.getText(), "cleared draft", "the draft still comes back before the queue");
+		} finally {
+			await host.emit("session_shutdown", {}, TUI_CTX);
+		}
+	});
+});
+
+test("keys off/on through the config bus under an external wrapper keeps draft priority", async () => {
+	await withConfig({}, async () => {
+		const original = CustomEditor.prototype.handleInput;
+		const host = fakePi();
+		index.default(host.pi);
+		await host.emit("session_start", { reason: "startup" }, { ...TUI_CTX, hasPendingMessages: () => true });
+		const inner = CustomEditor.prototype.handleInput;
+		let calls = 0;
+		CustomEditor.prototype.handleInput = function (data) {
+			assert.ok(++calls < 200, "no runaway recursion through the external wrapper");
+			inner.call(this, data);
+		};
+		try {
+			config.saveConfig({ ccKeys: false });
+			host.pi.events.emit("pi-cc:config", config.loadConfig());
+			config.saveConfig({ ccKeys: true });
+			host.pi.events.emit("pi-cc:config", config.loadConfig());
+			const ui = makeEditor();
+			ui.editor.onAction("app.message.dequeue", () => ui.editor.setText("queued message"));
+			ui.type("cleared draft");
+			ui.press(CTRL_C, UP);
+			assert.equal(ui.editor.getText(), "cleared draft", "the draft still comes back first");
+		} finally {
+			CustomEditor.prototype.handleInput = inner;
+			await host.emit("session_shutdown", {}, TUI_CTX);
+			CustomEditor.prototype.handleInput = original;
+		}
+	});
+});
+
+test("an unrelated config toggle keeps the held draft and the user's keybindings", async () => {
+	await withConfig({}, async () => {
+		const host = fakePi();
+		index.default(host.pi);
+		await host.emit("session_start", { reason: "startup" }, TUI_CTX);
+		try {
+			const ui = makeEditor({ "tui.input.submit": ["enter", "ctrl+enter"] });
+			ui.editor.onAction("app.message.dequeue", () => ui.editor.setText("queued message"));
+			ui.type("held text");
+			ui.press(CTRL_C);
+			config.saveConfig({ footer: true });
+			host.pi.events.emit("pi-cc:config", config.loadConfig());
+			assert.deepEqual(ui.manager.getUserBindings()["tui.input.submit"], ["enter", "ctrl+enter"], "the user's keymap is intact");
+			ui.press(UP);
+			assert.equal(ui.editor.getText(), "held text", "the held draft survives the toggle");
+		} finally {
+			await host.emit("session_shutdown", {}, TUI_CTX);
+		}
+	});
+});
+
 test("either patch can come off first, and Pi's method comes back", () => {
 	// The order index.ts used before the chain: cc-keys on the inside.
 	const unKeys = keys.installCcKeys(() => false);

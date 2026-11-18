@@ -225,3 +225,17 @@ test("agent_settled without a run that reached agent_end writes nothing (e.g. ca
 	await host.emit("agent_settled", { aborted: true });
 	assert.equal(host.entries.length, 0);
 });
+
+test("a failure before agent_start writes nothing: an agent_end without stats of its own has nothing to report", async () => {
+	const host = fakePi();
+	summary.default(host.pi);
+	// Pi's handleRunFailure emits agent_end when the run throws before the loop
+	// started (e.g. "Cannot continue"); no turn was counted, so no line is drawn.
+	await end(host, [{ role: "assistant", stopReason: "error", content: [] }]);
+	assert.equal(host.entries.length, 0);
+	// And a later real turn is counted fresh, not from the failed start.
+	await host.emit("agent_start");
+	await end(host, [{ role: "assistant", stopReason: "end", content: [] }]);
+	assert.equal(host.entries.length, 1);
+	assert.equal(host.entries[0].data.outcome, "completed");
+});

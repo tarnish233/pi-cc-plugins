@@ -168,12 +168,17 @@ export function installDraftHold(proto: object = CustomEditor.prototype): (() =>
 	};
 }
 
-export default function draftExtension(pi: ExtensionAPI): () => void {
+export default function draftExtension(pi: ExtensionAPI): (reinstall?: boolean) => void {
 	let uninstall: (() => void) | undefined;
 	let inTui = false;
 	/** Follow the shared `draft` setting: install or take the patch off. */
-	const sync = () => {
+	const sync = (reinstall = false) => {
 		const enabled = loadConfig().draft;
+		// index.ts re-seats both features in chain order on a config change.
+		if (reinstall && uninstall) {
+			uninstall();
+			uninstall = undefined;
+		}
 		if (enabled && inTui && !uninstall) uninstall = installDraftHold();
 		else if ((!enabled || !inTui) && uninstall) {
 			uninstall();

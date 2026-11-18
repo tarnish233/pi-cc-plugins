@@ -234,25 +234,23 @@ export default function turnSummary(pi: ExtensionAPI): void {
 		return new Markdown(summaryMarkdown(entry.data, colors), 1, 0, getMarkdownTheme());
 	});
 
-	let stats = new TurnStats();
+	/** The active turn's counts; undefined between turns, so idle needs no flag. */
+	let stats: TurnStats | undefined;
 	/** Messages of the run's last agent_end, kept for the outcome at settle time. */
 	let lastEnd: ReadonlyArray<{ role?: string; stopReason?: string }> | undefined;
-	/** False while a run is active, true again after it settles. */
-	let idle = true;
 	pi.on("agent_start", () => {
 		// agent_start also fires for retries and other continuations inside the
-		// same run (agent.continue()); only the one after idle opens a new turn,
-		// so the summary covers the whole turn, attempts included.
-		if (!idle) return;
+		// same run (agent.continue()); only the one after a settle opens a new
+		// turn, so the summary covers the whole turn, attempts included.
+		if (stats) return;
 		stats = new TurnStats();
 		lastEnd = undefined;
-		idle = false;
 	});
 	pi.on("tool_execution_start", (event) => {
-		stats.recordToolStart(event.toolName, event.args);
+		stats?.recordToolStart(event.toolName, event.args);
 	});
 	pi.on("tool_execution_end", (event) => {
-		stats.recordToolResult(event.isError === true);
+		stats?.recordToolResult(event.isError === true);
 	});
 	pi.on("agent_end", (event) => {
 		// agent_end is not the end of a turn: a failed request that Pi will retry
@@ -264,12 +262,15 @@ export default function turnSummary(pi: ExtensionAPI): void {
 	pi.on("agent_settled", () => {
 		// Fires once when the whole run is over: finished, interrupted, or failed
 		// with the retries spent. A run that never reached an agent loop (cancelled
-		// while starting) settles without an agent_end; nothing to write then.
-		idle = true;
+		// while starting) settles without an agent_end; nothing to write then. A
+		// failure before agent_start has an agent_end but no stats of its own, and
+		// a settled turn's stats must never be reported twice — so both are needed.
+		const settled = stats;
+		stats = undefined;
 		const messages = lastEnd;
 		lastEnd = undefined;
-		if (!messages) return;
+		if (!settled || !messages) return;
 		if (!loadConfig().turnSummary) return;
-		pi.appendEntry(TURN_SUMMARY_ENTRY_TYPE, stats.snapshot(Date.now(), runOutcome(messages)));
+		pi.appendEntry(TURN_SUMMARY_ENTRY_TYPE, settled.snapshot(Date.now(), runOutcome(messages)));
 	});
 }

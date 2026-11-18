@@ -76,6 +76,9 @@ interface CcEditor {
 	disableSubmit?: boolean;
 	/** CustomEditor's app action handlers (private). */
 	actionHandlers?: Map<string, () => void>;
+	/** The texts behind [paste #n] markers (private in Pi's types). */
+	pastes?: Map<number, string>;
+	pasteCounter?: number;
 	/** The KeybindingsManager Pi handed this editor. */
 	keybindings?: Keybindings;
 }
@@ -91,16 +94,6 @@ type EditorPrototype = Record<PropertyKey, unknown>;
 
 /** The actions whose bindings are affected by the queue key. */
 const CC_ACTIONS = ["app.message.followUp", "tui.input.submit"] as const;
-
-/**
- * What those actions are bound to. `tui.input.submit` is not written: `enter`
- * is already Pi's default for it, so the slash-menu fall-through still
- * submits through that action, and writing it would double-claim enter in
- * getConflicts().
- */
-const ccBindings = (): Bindings => ({
-	"app.message.followUp": "enter",
-});
 
 type Bindings = Record<string, unknown>;
 
@@ -131,7 +124,10 @@ function applyCcBindings(manager: Keybindings | undefined, patched: Patched): vo
 	patched.delete(manager);
 	// The user's keymap wins, even when it spells out Pi's default pair.
 	if (CC_ACTIONS.some((action) => action in current)) return;
-	const after = { ...current, ...ccBindings() };
+	// `tui.input.submit` is not written: `enter` is already Pi's default for it,
+	// so the slash-menu fall-through still submits through that action, and
+	// writing it would double-claim enter in getConflicts().
+	const after = { ...current, "app.message.followUp": "enter" };
 	patched.set(manager, { before: { ...current }, after });
 	manager.setUserBindings(after);
 }
@@ -148,7 +144,7 @@ function restoreCcBindings(patched: Patched): void {
 }
 
 /** Whether the key is bound to one of these actions on this editor. */
-function matchesAny(editor: CcEditor, data: string, actions: string[]): boolean {
+function matchesAny(editor: CcEditor, data: string, actions: readonly string[]): boolean {
 	const keys = editor.keybindings;
 	if (typeof keys?.matches !== "function") return false;
 	return actions.some((action) => keys.matches?.(data, action));
@@ -163,7 +159,7 @@ function matchesAny(editor: CcEditor, data: string, actions: string[]): boolean 
 const isUpKey = (editor: CcEditor, data: string): boolean =>
 	matchesKey(data, "ctrl+p") || matchesAny(editor, data, ["tui.editor.cursorUp", "tui.editor.historyPrevious"]);
 
-const isCcKey = (editor: CcEditor, data: string): boolean => matchesAny(editor, data, [...CC_ACTIONS]);
+const isCcKey = (editor: CcEditor, data: string): boolean => matchesAny(editor, data, CC_ACTIONS);
 
 /** Run the editor's own handling with the app actions out of the way. */
 function withoutActions(editor: CcEditor, run: () => void): void {
@@ -229,8 +225,12 @@ export function installCcKeys(
 		const dequeue = self.actionHandlers?.get("app.message.dequeue");
 		if (dequeue && matchesAny(self, data, ["app.message.dequeue"])) {
 			const before = self.getText();
+			// Pi's dequeue replaces the text and drops the paste map; keep it so
+			// Down can put the collapsed draft back whole, markers included.
+			const pastes = self.pastes instanceof Map && self.pastes.size > 0 ? new Map(self.pastes) : undefined;
+			const pasteCounter = self.pasteCounter;
 			next();
-			if (self.getText() !== before) noteRecall(self, before);
+			if (self.getText() !== before) noteRecall(self, before, pastes && { pastes, pasteCounter });
 			return;
 		}
 		// The menu and a disabled submit own Enter, without any app action taking
@@ -253,7 +253,7 @@ export function installCcKeys(
 	};
 }
 
-export default function ccKeysExtension(pi: ExtensionAPI): () => void {
+export default function ccKeysExtension(pi: ExtensionAPI): (reinstall?: boolean) => void {
 	let uninstall: (() => void) | undefined;
 	let inTui = false;
 	let ctx: ExtensionContext | undefined;
@@ -266,8 +266,13 @@ export default function ccKeysExtension(pi: ExtensionAPI): () => void {
 		}
 	};
 	/** Follow the shared `ccKeys` setting: install or take the patch off. */
-	const sync = () => {
+	const sync = (reinstall = false) => {
 		const enabled = loadConfig().ccKeys;
+		// index.ts re-seats both features in chain order on a config change.
+		if (reinstall && uninstall) {
+			uninstall();
+			uninstall = undefined;
+		}
 		if (enabled && inTui && !uninstall) uninstall = installCcKeys(hasQueued);
 		else if ((!enabled || !inTui) && uninstall) {
 			uninstall();

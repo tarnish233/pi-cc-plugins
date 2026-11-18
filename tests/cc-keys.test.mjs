@@ -9,8 +9,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
-import { fakePi, loadModule, loadPi, TUI_CTX } from "./helpers.mjs";
+import { fakePi, findPiInstall, loadModule, loadPi, TUI_CTX } from "./helpers.mjs";
 
 const pi = await loadPi();
 const keys = await loadModule("cc-keys.ts");
@@ -47,7 +48,9 @@ const UP = "\x1b[A";
 const DOWN = "\x1b[B";
 const ALT_UP = "\x1b[1;3A";
 const CTRL_P = "\x10";
+const CTRL_N = "\x0e";
 const CTRL_ENTER = "\x1b[13;5u";
+const paste = (text) => `\x1b[200~${text}\x1b[201~`;
 
 const identity = (text) => text;
 const editorTheme = {
@@ -439,6 +442,104 @@ test("patched: Down after Alt+Up with text in the editor brings that text back",
 	}
 });
 
+test("patched: Down after Alt+Up restores a collapsed paste whole, body and marker", () => {
+	const { editor, press } = makeEditor();
+	const content = Array.from({ length: 20 }, (_, i) => `中国🙂 line ${i}`).join("\n");
+	// Pi's dequeue merges the expanded draft (restoreQueuedMessagesToEditor).
+	editor.onAction("app.message.dequeue", () => {
+		editor.setText(["queued message", editor.getExpandedText()].filter((text) => text.trim()).join("\n\n"));
+	});
+	const uninstall = keys.installCcKeys(() => true);
+	try {
+		editor.handleInput(paste(content));
+		const shown = editor.getText();
+		assert.equal(editor.getExpandedText(), content);
+		press(ALT_UP);
+		assert.equal(editor.getExpandedText(), `queued message\n\n${content}`);
+		press(DOWN);
+		assert.equal(editor.getText(), shown, "the collapsed display comes back");
+		assert.equal(editor.getExpandedText(), content, "with the paste body behind the marker");
+		let submitted;
+		editor.onSubmit = (text) => {
+			submitted = text;
+		};
+		editor.onAction("app.message.followUp", () => {
+			const text = editor.getExpandedText().trim();
+			editor.setText("");
+			editor.onSubmit?.(text);
+		});
+		press(ENTER);
+		assert.equal(submitted, content, "submit sends the real paste body, not the marker");
+	} finally {
+		uninstall();
+	}
+});
+
+test("patched: Ctrl+N on the default keymap dismisses a Ctrl+P recalled queue", () => {
+	const { editor, manager, press } = makeEditor();
+	editor.onAction("app.message.dequeue", () => editor.setText("queued message"));
+	const uninstall = keys.installCcKeys(() => true);
+	try {
+		assert.deepEqual(manager.getKeys("tui.editor.cursorDown"), ["down"], "no Ctrl+N alias configured");
+		press(CTRL_P);
+		assert.equal(editor.getText(), "queued message");
+		press(CTRL_N);
+		assert.equal(editor.getText(), "", "Ctrl+N puts the prompt back, as CC's prompt does");
+	} finally {
+		uninstall();
+	}
+});
+
+test("patched: Ctrl+N with no recall record is left to its own binding", () => {
+	const { editor, type, press } = makeEditor();
+	let restores = 0;
+	editor.onAction("app.message.dequeue", () => {
+		restores++;
+	});
+	const uninstall = keys.installCcKeys(() => true);
+	try {
+		type("typing");
+		press(CTRL_N);
+		assert.equal(restores, 0);
+		assert.equal(editor.getText(), "typing", "the unsent text is not cleared");
+	} finally {
+		uninstall();
+	}
+});
+
+test("patched: a dedicated history action on Ctrl+N keeps precedence over recall dismissal", () => {
+	const { editor, press } = makeEditor({ "tui.editor.historyNext": "ctrl+n" });
+	editor.onAction("app.message.dequeue", () => editor.setText("queued message"));
+	const uninstall = keys.installCcKeys(() => true);
+	try {
+		press(CTRL_P);
+		assert.equal(editor.getText(), "queued message");
+		press(CTRL_N);
+		assert.equal(editor.getText(), "queued message", "the dedicated history action wins");
+	} finally {
+		uninstall();
+	}
+});
+
+test("patched: a sent queue recall does not clear a later identical draft on Down", () => {
+	const { editor, type, press } = makeEditor();
+	editor.onAction("app.message.dequeue", () => editor.setText("继续"));
+	editor.onAction("app.message.followUp", () => editor.setText(""));
+	const uninstall = keys.installCcKeys(() => true);
+	try {
+		press(CTRL_P);
+		assert.equal(editor.getText(), "继续");
+		press(ENTER);
+		assert.equal(editor.getText(), "", "the recalled text was sent");
+		type("继续");
+		assert.equal(editor.getText(), "继续");
+		press(DOWN);
+		assert.equal(editor.getText(), "继续", "the new unsent draft survives Down");
+	} finally {
+		uninstall();
+	}
+});
+
 test("patched: Down leaves a restored message that was edited", () => {
 	const { editor, type, press } = makeEditor();
 	editor.onAction("app.message.dequeue", () => editor.setText("queued message"));
@@ -480,6 +581,43 @@ test("patched: history browsing still clears on Down", () => {
 		press(DOWN);
 		assert.equal(editor.getText(), "", "the editor's own history handling still runs");
 		assert.deepEqual(calls, { queue: 0, submit: 0 });
+	} finally {
+		uninstall();
+	}
+});
+
+test("patched: native dequeue restores the compaction queue without leaving a duplicate", async () => {
+	const { InteractiveMode } = await import(pathToFileURL(path.join(path.dirname(findPiInstall().piCodingAgent), "modes", "interactive", "interactive-mode.js")).href);
+	const session = Object.create(pi.agent.AgentSession.prototype);
+	session._steeringMessages = [];
+	session._followUpMessages = [];
+	session._emit = () => {};
+	session.agent = { clearAllQueues() {} };
+	Object.defineProperty(session, "isCompacting", { value: true });
+	const { editor, press } = makeEditor();
+	const mode = Object.create(InteractiveMode.prototype);
+	Object.defineProperty(mode, "session", { value: session });
+	mode.editor = editor;
+	mode.compactionQueuedMessages = [];
+	mode.updatePendingMessagesDisplay = () => {};
+	mode.showStatus = () => {};
+	editor.onAction("app.message.followUp", () => mode.handleFollowUp());
+	editor.onAction("app.message.dequeue", () => mode.handleDequeue());
+	const uninstall = keys.installCcKeys(() => session.pendingMessageCount > 0);
+	try {
+		const text = Array.from({ length: 20 }, (_, i) => `第 ${i} 行任务🙂`).join("\n");
+		editor.handleInput(paste(text));
+		press(ENTER);
+		assert.equal(editor.getText(), "");
+		assert.equal(session.pendingMessageCount, 0, "the public query cannot see the compaction-only queue");
+		assert.deepEqual(mode.getAllQueuedMessages(), { steering: [], followUp: [text] });
+		// The native action also drains an ordinary session queue, not a history copy.
+		session._steeringMessages.push("already pending");
+		press(ALT_UP);
+		assert.equal(editor.getExpandedText(), `already pending\n\n${text}`);
+		assert.deepEqual(mode.getAllQueuedMessages(), { steering: [], followUp: [] });
+		assert.equal(session.pendingMessageCount, 0);
+		assert.equal(mode.compactionQueuedMessages.length, 0, "the original message will not later send again");
 	} finally {
 		uninstall();
 	}
