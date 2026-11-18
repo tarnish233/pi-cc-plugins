@@ -176,3 +176,88 @@ test("Up brings the cleared draft back first, then the queued message", () => {
 		unDraft?.();
 	}
 });
+
+test("a patch stacked on top plus a draft re-install does not loop the chain", () => {
+	const unDraft = draft.installDraftHold();
+	const unKeys = keys.installCcKeys(() => false);
+	// A third party wraps handleInput on top of the chain.
+	const inner = CustomEditor.prototype.handleInput;
+	let outerCalls = 0;
+	CustomEditor.prototype.handleInput = function (data) {
+		outerCalls++;
+		assert.ok(outerCalls < 50, "no runaway recursion through the third-party wrapper");
+		inner.call(this, data);
+	};
+	try {
+		// /pi_cc draft off then on: draft re-installs into a NEW chain under the
+		// third party, while cc-keys stays in the old one.
+		unDraft?.();
+		const unDraft2 = draft.installDraftHold();
+		try {
+			const ui = makeEditor();
+			// Backslash + Enter: cc-keys takes the key over and asks for the
+			// editor's own handling, which must be ITS chain's original.
+			ui.type("one\\");
+			ui.press("\r");
+			assert.equal(ui.editor.getText(), "one\n", "Pi's newline fallback ran, once");
+		} finally {
+			unDraft2?.();
+		}
+	} finally {
+		CustomEditor.prototype.handleInput = inner;
+		unKeys?.();
+	}
+	assert.equal(CustomEditor.prototype.handleInput, PI_HANDLE_INPUT, "Pi's method is back");
+});
+
+test("a wrapper stacked on addToHistory stops injecting drafts once the feature is off", () => {
+	const unDraft = draft.installDraftHold();
+	// A third party wraps addToHistory on top of ours, so uninstall cannot
+	// restore Pi's method and our wrapper keeps being called.
+	const inner = CustomEditor.prototype.addToHistory;
+	CustomEditor.prototype.addToHistory = function (text) {
+		inner.call(this, text);
+	};
+	try {
+		const ui = makeEditor();
+		ui.type("secret draft");
+		ui.press(CTRL_C);
+		unDraft?.(); // /pi_cc draft off
+		ui.editor.addToHistory("sent prompt");
+		assert.deepEqual(ui.editor.history, ["sent prompt"], "the cleared draft stays out of history while off");
+	} finally {
+		CustomEditor.prototype.addToHistory = inner;
+		unDraft?.();
+	}
+});
+
+test("one install's uninstall leaves another install's managers alone", () => {
+	// Two sessions in one process: each installs on its own editor class.
+	const makeProto = () => ({
+		handleInput() {},
+		isShowingAutocomplete: () => false,
+		getText: () => "",
+		setText() {},
+	});
+	const protoA = makeProto();
+	const protoB = makeProto();
+	const unA = keys.installCcKeys(() => false, protoA);
+	const unB = keys.installCcKeys(() => false, protoB);
+	const managerA = new pi.KeybindingsManager({});
+	const managerB = new pi.KeybindingsManager({});
+	try {
+		const editorOf = (manager) => ({ keybindings: manager, isShowingAutocomplete: () => false, getText: () => "" });
+		// One keypress through each patch registers its manager.
+		protoA.handleInput.call(editorOf(managerA), "x");
+		protoB.handleInput.call(editorOf(managerB), "x");
+		assert.equal(managerA.matches("\r", "app.message.followUp"), true);
+		assert.equal(managerB.matches("\r", "app.message.followUp"), true);
+		unA?.();
+		assert.equal("app.message.followUp" in managerA.getUserBindings(), false, "its own manager is restored");
+		assert.equal(managerB.matches("\r", "app.message.followUp"), true, "the other install keeps its bindings");
+	} finally {
+		unA?.();
+		unB?.();
+	}
+	assert.equal("app.message.followUp" in managerB.getUserBindings(), false);
+});

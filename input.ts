@@ -28,8 +28,13 @@ import { CustomEditor } from "@earendil-works/pi-coding-agent";
 /** An editor as the chain hands it on; each interceptor narrows it to what it needs. */
 export type ChainEditor = Record<PropertyKey, unknown> & { handleInput(data: string): void };
 
-/** What a feature asks of one key: handle it, or call `next` to pass it on. */
-export type InputInterceptor = (editor: ChainEditor, data: string, next: () => void) => void;
+/**
+ * What a feature asks of one key: handle it, or call `next` to pass it on.
+ * `own` runs the editor's handling under THIS chain, skipping the chain — it
+ * must be this chain's original, not the current chain on the prototype, or a
+ * patch stacked on top plus a re-install would loop back into the chain.
+ */
+export type InputInterceptor = (editor: ChainEditor, data: string, next: () => void, own: () => void) => void;
 
 interface InputChain {
 	readonly interceptors: InputInterceptor[];
@@ -70,7 +75,8 @@ export function interceptEditorInput(
 		created.wrapper = function (this: unknown, data: string): void {
 			const list = created.interceptors;
 			const run = (index: number): void => {
-				if (index < list.length) list[index](this as ChainEditor, data, () => run(index + 1));
+				if (index < list.length)
+					list[index](this as ChainEditor, data, () => run(index + 1), () => created.original.call(this, data));
 				else created.original.call(this, data);
 			};
 			run(0);
@@ -88,13 +94,4 @@ export function interceptEditorInput(
 		if (target.handleInput === chain.wrapper) target.handleInput = chain.original;
 		if (chainOf(target) === chain) delete target[CHAIN];
 	};
-}
-
-/**
- * The editor's own key handling, skipping the chain: for a key an interceptor
- * takes over (the slash menu's Enter must not reach the queue action). A no-op
- * when nothing is patched.
- */
-export function editorInput(editor: object, data: string, proto: object = CustomEditor.prototype): void {
-	chainOf(proto as EditorPrototype)?.original.call(editor, data);
 }

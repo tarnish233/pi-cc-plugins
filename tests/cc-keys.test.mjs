@@ -218,6 +218,16 @@ test("patched: a keymap the user wrote is left alone", () =>
 		assert.equal("app.message.followUp" in manager.getUserBindings(), false);
 	}));
 
+test("patched: enter is claimed once, not double-claimed against Pi's default", () =>
+	withKeys(() => {
+		const { manager, type, press } = makeEditor();
+		type("x");
+		press(ENTER); // the bindings go in on the first key
+		assert.deepEqual(manager.getConflicts(), [], "no manufactured enter conflict");
+		assert.equal("tui.input.submit" in manager.getUserBindings(), false, "Pi's default enter is not rewritten");
+		assert.equal(manager.matches(ENTER, "tui.input.submit"), true, "submit still resolves to enter");
+	}));
+
 test("patched: a user-defined Ctrl+Enter binding still submits", () =>
 	withKeys(() => {
 		const { manager, calls, type, press } = makeEditor({ "tui.input.submit": ["enter", "ctrl+enter"] });

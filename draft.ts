@@ -143,8 +143,11 @@ export function installDraftHold(proto: object = CustomEditor.prototype): (() =>
 	if (!remove) return undefined;
 
 	// Pi calls addToHistory for every prompt sent: a draft still held goes in first.
+	// A wrapper someone patched over ours survives uninstall; once off it must
+	// stop injecting held drafts and only pass through.
+	let active = true;
 	const wrapperAddToHistory = function (this: DraftEditor, text: string): void {
-		const draft = drafts.get(this);
+		const draft = active ? drafts.get(this) : undefined;
 		if (draft) {
 			drafts.delete(this);
 			addToHistory.call(this, draft.expanded);
@@ -155,6 +158,7 @@ export function installDraftHold(proto: object = CustomEditor.prototype): (() =>
 	target[INSTALLED] = true;
 	return () => {
 		remove();
+		active = false;
 		// Only put Pi's method back if it is still the one below us.
 		if (target.addToHistory === wrapperAddToHistory) {
 			if (ownAddToHistory) target.addToHistory = addToHistory;

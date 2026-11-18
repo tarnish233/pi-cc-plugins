@@ -4,8 +4,9 @@
  *
  * Pi's default is enter steers (sent into the run) and alt+enter queues.
  * `app.message.followUp` queues while streaming and falls back to a normal
- * submit when idle. The patch fills the keys into the KeybindingsManager Pi
- * handed the editor: `app.message.followUp` = enter, `tui.input.submit` = enter.
+ * submit when idle. The patch fills the key into the KeybindingsManager Pi
+ * handed the editor: `app.message.followUp` = enter; `tui.input.submit` keeps
+ * Pi's default enter.
  * It is in-memory only; keybindings.json stays the user's. A user who set
  * either action there keeps their keymap, and the feature stays out of the way.
  *
@@ -54,7 +55,7 @@
 import { CustomEditor, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey } from "@earendil-works/pi-tui";
 import { loadConfig } from "./config.ts";
-import { editorInput, interceptEditorInput, type ChainEditor } from "./input.ts";
+import { interceptEditorInput, type ChainEditor } from "./input.ts";
 import { noteRecall, promptDown } from "./recall.ts";
 
 const INSTALLED = Symbol.for("pi-cc-plugins:cc-keys");
@@ -92,19 +93,19 @@ type EditorPrototype = Record<PropertyKey, unknown>;
 const CC_ACTIONS = ["app.message.followUp", "tui.input.submit"] as const;
 
 /**
- * What those actions are bound to. `tui.input.submit` keeps `enter`: the
- * editor's slash-menu fall-through submits the command it just completed with
- * the same Enter, and that check reads this action.
+ * What those actions are bound to. `tui.input.submit` is not written: `enter`
+ * is already Pi's default for it, so the slash-menu fall-through still
+ * submits through that action, and writing it would double-claim enter in
+ * getConflicts().
  */
 const ccBindings = (): Bindings => ({
 	"app.message.followUp": "enter",
-	"tui.input.submit": "enter",
 });
 
 type Bindings = Record<string, unknown>;
 
-/** What this patch wrote into a manager, and what was there before it. */
-const patched = new Map<Keybindings, { before: Bindings; after: Bindings }>();
+/** What one install wrote into a manager, and what was there before it. */
+type Patched = Map<Keybindings, { before: Bindings; after: Bindings }>;
 
 const sameValue = (left: unknown, right: unknown): boolean =>
 	Array.isArray(left) && Array.isArray(right)
@@ -121,7 +122,7 @@ const sameBindings = (left: Bindings, right: Bindings): boolean => {
  * A manager that still holds what we wrote is left alone; one whose bindings
  * were replaced since (keybindings.json reloaded, say) is reconciled again.
  */
-function applyCcBindings(manager: Keybindings | undefined): void {
+function applyCcBindings(manager: Keybindings | undefined, patched: Patched): void {
 	if (typeof manager?.getUserBindings !== "function" || typeof manager.setUserBindings !== "function") return;
 	const current = manager.getUserBindings();
 	if (!current || typeof current !== "object") return;
@@ -139,7 +140,7 @@ function applyCcBindings(manager: Keybindings | undefined): void {
  * Put back the bindings each manager held before the patch, for managers still
  * holding ours: a manager someone else changed since is left as it is.
  */
-function restoreCcBindings(): void {
+function restoreCcBindings(patched: Patched): void {
 	for (const [manager, { before, after }] of patched) {
 		if (sameBindings(manager.getUserBindings?.() ?? {}, after)) manager.setUserBindings?.(before);
 	}
@@ -202,9 +203,12 @@ export function installCcKeys(
 	if (target[INSTALLED]) return undefined;
 	if (!REQUIRED.every((name) => typeof target[name] === "function")) return undefined;
 
-	const intercept = (editor: ChainEditor, data: string, next: () => void): void => {
+	// Per install: one session's uninstall must not strip another's bindings.
+	const patched: Patched = new Map();
+
+	const intercept = (editor: ChainEditor, data: string, next: () => void, own: () => void): void => {
 		const self = editor as unknown as CcEditor;
-		applyCcBindings(self.keybindings);
+		applyCcBindings(self.keybindings, patched);
 		// CC: Up on the empty prompt brings a queued message back for editing.
 		// Pi's own dequeue action does the restore; it is only taken here when
 		// the session reports something pending, so Up still browses history.
@@ -233,7 +237,7 @@ export function installCcKeys(
 		// it first; so does a backslash before plain Enter, Pi's newline fallback
 		// for terminals that cannot send Shift+Enter.
 		if (isCcKey(self, data) && (editorOwnsIt || (matchesKey(data, "enter") && continuesLine(self)))) {
-			withoutActions(self, () => editorInput(self, data, proto));
+			withoutActions(self, own);
 			return;
 		}
 		promptDown(self, data, self.keybindings, next);
@@ -245,7 +249,7 @@ export function installCcKeys(
 	return () => {
 		remove();
 		delete target[INSTALLED];
-		restoreCcBindings();
+		restoreCcBindings(patched);
 	};
 }
 
