@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.5.9] - 2026-11-18
+
+### Fixed
+- Keep the shared editor key chain intact when another extension patches `CustomEditor.handleInput` on top: toggling a feature off and on no longer recurses until the stack overflows and leaves the editor patched.
+- Stop injecting Ctrl+C drafts into ↑-history once Draft recall is turned off, even when another extension wrapped the editor's history method.
+- Scope the CC keys keybinding patch to each install, so one session's shutdown no longer removes another live session's Enter binding.
+- Stop writing Pi's own `tui.input.submit` default into user keybindings, which registered a spurious `enter` conflict.
+
 ## [0.5.8] - 2026-11-14
 
 ### Changed
