@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [0.5.10] - 2026-11-18
+
+### Fixed
+- Preserve folded paste bodies and paste counters when Alt+Up followed by Down restores the original draft, not just its display marker.
+- Invalidate stale recall records on input so sending a recalled message cannot later clear newly typed identical text.
+- Keep cleared-draft-before-queue recall priority across feature toggles and stacked editor wrappers without losing held drafts or custom bindings.
+- Recognize Ctrl+N at the default-keymap recall boundary while preserving menus, dedicated history actions and unowned shortcuts.
+- Catch shared settings-panel save errors and refuse destructive rewrites after settings read failures.
+- Do not report a prior turn's statistics when a failure emits agent_end before agent_start.
+
+### Changed
+- Represent active statistics with an optional record instead of duplicate idle state; inline the fixed binding and stop copying constant action arrays on each key press.
+- Document the preserved compaction-only queue limitation: use native dequeue (Alt+Up on macOS/Linux, Alt+Q on Windows/WSL, or the user's binding), since the public pending query cannot see that queue. Add a guard proving native dequeue drains it; this does not claim Up/Ctrl+P support for compaction-only queues.
+- Add paste, recall, toggle-order, default-keymap and startup-failure regressions; verify this release against Pi 1.5.2.
+
 ## [0.5.9] - 2026-11-18
 
 ### Fixed
