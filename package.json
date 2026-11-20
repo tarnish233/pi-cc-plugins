@@ -1,7 +1,7 @@
 {
 	"name": "pi-cc-plugins",
-	"version": "0.5.10",
-	"description": "Prompt keys for the Pi coding agent: Enter queues while Pi works, Up brings back a queued message or cleared draft, and a one-line summary closes every run.",
+	"version": "0.6.0",
+	"description": "Prompt keys for the Pi coding agent: Up brings back a queued message or cleared draft, and a one-line summary closes every run. Enter keeps Pi's own keys.",
 	"author": "tarnish233",
 	"type": "module",
 	"license": "MIT",

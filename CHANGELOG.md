@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-20
+
+### Changed
+- **Enter is no longer rebound.** The feature used to write `app.message.followUp = "enter"` into the editor's keybindings, so Enter queued the prompt and waited for the whole run to finish (Pi's follow-up lane). It now leaves every Enter key alone: Pi's own binding applies — while a run is streaming the prompt steers into it and lands at the next tool boundary, when idle it submits — and `keybindings.json` is not touched at all.
+- `ccKeys` now only drives the queued-message recall: Up / Ctrl+P on the empty prompt puts a queued message back, Down / Ctrl+N on its last visual line returns the prompt to what it was.
+- The recall, the native-dequeue watcher (Alt+Up) and the paste-preserving Down are unchanged.
+
+### Removed
+- The keybinding patch, its manager bookkeeping and the Enter-specific interception branches (slash menu, disabled submit, trailing backslash) — Pi's editor handles those keys itself now.
+
+### Notes
+- Restoring the old behaviour is one user line in `keybindings.json`: `"app.message.followUp": "enter"`.
+
 ## [0.5.10] - 2026-11-18
 
 ### Fixed

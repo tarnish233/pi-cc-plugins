@@ -146,7 +146,7 @@ const PAGES: SettingsPage[] = [
 				on: "on",
 				off: "off",
 				description:
-					"Enter queues while Pi works; Ctrl+Enter is not bound by this feature. off: Pi's keys (Enter sends, Alt+Enter queues).",
+					"Up on the empty prompt recalls a queued message and Down puts the prompt back. Enter keeps Pi's keys (steer while running, send when idle).",
 			},
 		],
 	},

@@ -107,21 +107,24 @@ test("turning the draft off leaves the CC keys working", async () => {
 	await withConfig({}, async () => {
 		const host = fakePi();
 		index.default(host.pi);
-		await host.emit("session_start", { reason: "startup" }, TUI_CTX);
+		const TUI_WITH_QUEUE = { ...TUI_CTX, hasPendingMessages: () => true };
+		await host.emit("session_start", { reason: "startup" }, TUI_WITH_QUEUE);
 		try {
 			config.saveConfig({ draft: false });
 			host.pi.events.emit("pi-cc:config", config.loadConfig());
 
 			const ui = makeEditor();
-			let queued = 0;
-			ui.editor.onAction("app.message.followUp", () => {
-				ui.editor.setText("");
-				queued++;
+			let restored = 0;
+			ui.editor.onAction("app.message.dequeue", () => {
+				restored++;
+				ui.editor.setText("queued message");
 			});
-			ui.type("queue me");
-			ui.press("\r");
-			assert.equal(queued, 1, "Enter still queues");
+			ui.press(UP);
+			assert.equal(restored, 1, "Up still recalls a queued message");
 
+			// The queue is drained now; Up must not keep restoring it below.
+			ui.editor.onAction("app.message.dequeue", () => {});
+			ui.editor.setText("");
 			ui.type("held");
 			ui.press(CTRL_C, UP);
 			assert.equal(ui.editor.getText(), "", "nothing is held while the draft feature is off");
@@ -304,7 +307,7 @@ test("a wrapper stacked on addToHistory stops injecting drafts once the feature 
 	}
 });
 
-test("one install's uninstall leaves another install's managers alone", () => {
+test("one install's uninstall leaves another install's patch alone", () => {
 	// Two sessions in one process: each installs on its own editor class.
 	const makeProto = () => ({
 		handleInput() {},
@@ -314,23 +317,19 @@ test("one install's uninstall leaves another install's managers alone", () => {
 	});
 	const protoA = makeProto();
 	const protoB = makeProto();
+	const originalA = protoA.handleInput;
+	const originalB = protoB.handleInput;
 	const unA = keys.installCcKeys(() => false, protoA);
 	const unB = keys.installCcKeys(() => false, protoB);
-	const managerA = new pi.KeybindingsManager({});
-	const managerB = new pi.KeybindingsManager({});
 	try {
-		const editorOf = (manager) => ({ keybindings: manager, isShowingAutocomplete: () => false, getText: () => "" });
-		// One keypress through each patch registers its manager.
-		protoA.handleInput.call(editorOf(managerA), "x");
-		protoB.handleInput.call(editorOf(managerB), "x");
-		assert.equal(managerA.matches("\r", "app.message.followUp"), true);
-		assert.equal(managerB.matches("\r", "app.message.followUp"), true);
+		assert.notEqual(protoA.handleInput, originalA, "the first install wrapped its own class");
+		assert.notEqual(protoB.handleInput, originalB, "the second install wrapped its own class");
 		unA?.();
-		assert.equal("app.message.followUp" in managerA.getUserBindings(), false, "its own manager is restored");
-		assert.equal(managerB.matches("\r", "app.message.followUp"), true, "the other install keeps its bindings");
+		assert.equal(protoA.handleInput, originalA, "its own class is back to Pi's method");
+		assert.notEqual(protoB.handleInput, originalB, "the other install keeps its wrapper");
 	} finally {
 		unA?.();
 		unB?.();
 	}
-	assert.equal("app.message.followUp" in managerB.getUserBindings(), false);
+	assert.equal(protoB.handleInput, originalB, "and the last one off leaves Pi's method");
 });

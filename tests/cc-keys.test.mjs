@@ -1,9 +1,11 @@
 /**
- * cc-keys.ts: Enter queues while a run is streaming, Ctrl+Enter remains
- * unbound, and the slash menu keeps Enter.
+ * cc-keys.ts: Up / Ctrl+P recall a queued message, Down / Ctrl+N put the
+ * prompt back, and Enter stays Pi's own key (steer while running, submit when
+ * idle — this package binds nothing to it).
  *
  * The tests drive Pi's real CustomEditor; the follow-up action is wired the way
- * InteractiveMode wires it (queue while streaming, submit when idle).
+ * InteractiveMode wires it (queue while streaming, submit when idle) so the
+ * tests can tell the two paths apart.
  */
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -104,140 +106,22 @@ function withKeys(body) {
 	}
 }
 
-test("Pi alone: Enter submits, Alt+Enter queues", () => {
-	const { editor, calls, type, press } = makeEditor();
-	type("hi");
-	press(ENTER);
-	assert.deepEqual(calls, { queue: 0, submit: 1 });
-
-	type("later");
-	press(ALT_ENTER);
-	assert.deepEqual(calls, { queue: 1, submit: 1 });
-	assert.equal(editor.getText(), "");
-});
-
-test("patched: Enter queues while a run streams; Ctrl+Enter does not send", () =>
+test("Enter and Alt+Enter keep Pi's own meaning with the patch on", () =>
 	withKeys(() => {
 		const { editor, manager, calls, type, press } = makeEditor();
-		type("queue me");
+		type("hi");
 		press(ENTER);
-		assert.deepEqual(calls, { queue: 1, submit: 0 }, "Enter queues");
+		assert.deepEqual(calls, { queue: 0, submit: 1 }, "Enter submits");
 
-		type("send me");
-		press(CTRL_ENTER);
-		assert.deepEqual(calls, { queue: 1, submit: 0 }, "Ctrl+Enter does not submit or queue");
-		assert.equal(editor.getText(), "send me", "the unsent prompt stays in the editor");
-		assert.equal(manager.matches(CTRL_ENTER, "tui.input.submit"), false, "the plugin does not bind Ctrl+Enter");
-	}));
-
-test("patched: when idle, only Enter submits (the queue action falls back)", () =>
-	withKeys(() => {
-		const { editor, calls, type, press } = makeEditor({}, { streaming: false });
-		type("just send");
-		press(CTRL_ENTER);
-		assert.deepEqual(calls, { queue: 0, submit: 0 }, "Ctrl+Enter stays unbound while idle");
-		assert.equal(editor.getText(), "just send");
-		press(ENTER);
-		assert.deepEqual(calls, { queue: 0, submit: 1 });
-	}));
-
-test("patched: a backslash before Enter still continues the line instead of sending", () =>
-	withKeys(() => {
-		const { editor, calls, type, press } = makeEditor();
-		type("one\\");
-		press(ENTER);
-		assert.equal(editor.getText(), "one\n", "Pi's fallback for terminals without Shift+Enter");
-		assert.deepEqual(calls, { queue: 0, submit: 0 }, "nothing was sent");
-	}));
-
-test("patched: Ctrl+Enter after a backslash no longer bypasses Pi's editor", () =>
-	withKeys(() => {
-		const { editor, calls, type, press } = makeEditor();
-		type("one\\");
-		press(CTRL_ENTER);
-		assert.deepEqual(calls, { queue: 0, submit: 0 });
-		assert.equal(editor.getText(), "one\\", "the prompt was not sent");
-	}));
-
-test("patched: the slash menu keeps Enter — it confirms, then runs the command", () =>
-	withKeys(() => {
-		const { editor, calls } = makeEditor();
-		let applied = 0;
-		let submitted;
-		editor.onSubmit = (text) => {
-			calls.submit++;
-			submitted = text;
-		};
-		editor.setText("/");
-		editor.autocompletePrefix = "/";
-		editor.autocompleteState = "regular";
-		editor.autocompleteList = {
-			handleInput() {},
-			getSelectedItem: () => ({ value: "/settings", label: "settings" }),
-		};
-		editor.autocompleteProvider = {
-			applyCompletion: () => {
-				applied++;
-				return { lines: ["/settings"], cursorLine: 0, cursorCol: 9 };
-			},
-		};
-		editor.handleInput(ENTER);
-		assert.equal(applied, 1, "the completion was applied");
-		assert.equal(submitted, "/settings", "and the same Enter submitted the command, as Pi does");
-		assert.deepEqual(calls, { queue: 0, submit: 1 }, "the queue action never saw it");
-		assert.equal(editor.getText(), "", "the editor is cleared, as after any submit");
-	}));
-
-test("patched: an editor that disables submit applies the completion but submits nothing", () =>
-	withKeys(() => {
-		const { editor, calls } = makeEditor();
-		let applied = 0;
-		editor.disableSubmit = true;
-		editor.setText("/");
-		editor.autocompletePrefix = "/";
-		editor.autocompleteState = "regular";
-		editor.autocompleteList = {
-			handleInput() {},
-			getSelectedItem: () => ({ value: "/settings", label: "settings" }),
-		};
-		editor.autocompleteProvider = {
-			applyCompletion: () => {
-				applied++;
-				return { lines: ["/settings"], cursorLine: 0, cursorCol: 9 };
-			},
-		};
-		editor.handleInput(ENTER);
-		assert.equal(applied, 1);
-		assert.deepEqual(calls, { queue: 0, submit: 0 });
-		assert.equal(editor.getText(), "/settings");
-	}));
-
-test("patched: a keymap the user wrote is left alone", () =>
-	withKeys(() => {
-		const { editor, manager, calls, type, press } = makeEditor({ "tui.input.submit": "enter" });
-		type("mine");
-		press(ENTER);
-		assert.deepEqual(calls, { queue: 0, submit: 1 }, "Enter stayed submit");
-		assert.equal("app.message.followUp" in manager.getUserBindings(), false);
-	}));
-
-test("patched: enter is claimed once, not double-claimed against Pi's default", () =>
-	withKeys(() => {
-		const { manager, type, press } = makeEditor();
-		type("x");
-		press(ENTER); // the bindings go in on the first key
-		assert.deepEqual(manager.getConflicts(), [], "no manufactured enter conflict");
-		assert.equal("tui.input.submit" in manager.getUserBindings(), false, "Pi's default enter is not rewritten");
-		assert.equal(manager.matches(ENTER, "tui.input.submit"), true, "submit still resolves to enter");
-	}));
-
-test("patched: a user-defined Ctrl+Enter binding still submits", () =>
-	withKeys(() => {
-		const { manager, calls, type, press } = makeEditor({ "tui.input.submit": ["enter", "ctrl+enter"] });
-		type("my shortcut");
-		press(CTRL_ENTER);
-		assert.deepEqual(calls, { queue: 0, submit: 1 }, "the user's shortcut wins");
-		assert.equal("app.message.followUp" in manager.getUserBindings(), false);
+		type("later");
+		press(ALT_ENTER);
+		assert.deepEqual(calls, { queue: 1, submit: 1 }, "Alt+Enter queues");
+		assert.equal(editor.getText(), "");
+		assert.equal(
+			Object.keys(manager.getUserBindings()).some((action) => action.startsWith("app.message.")),
+			false,
+			"no queue keybinding was written into the manager",
+		);
 	}));
 
 test("patched: an editor that disables submit neither queues nor restores", () =>
@@ -255,19 +139,6 @@ test("patched: an editor that disables submit neither queues nor restores", () =
 		editor.handleInput(UP);
 		assert.equal(restores, 0, "Up stays with the prompt");
 	}));
-
-test("uninstall gives Pi's keys back", () => {
-	const { manager, calls, type, press } = makeEditor();
-	const uninstall = keys.installCcKeys();
-	type("while patched");
-	press(ENTER);
-	assert.deepEqual(calls, { queue: 1, submit: 0 });
-	uninstall?.();
-	type("after");
-	press(ENTER);
-	assert.deepEqual(calls, { queue: 1, submit: 1 }, "Enter submits again");
-	assert.equal("tui.input.submit" in manager.getUserBindings(), false);
-});
 
 test("patched: Up on the empty editor restores the queued message, as CC does", () => {
 	const { editor, calls, press } = makeEditor();
@@ -468,7 +339,7 @@ test("patched: Down after Alt+Up restores a collapsed paste whole, body and mark
 			editor.setText("");
 			editor.onSubmit?.(text);
 		});
-		press(ENTER);
+		press(ALT_ENTER);
 		assert.equal(submitted, content, "submit sends the real paste body, not the marker");
 	} finally {
 		uninstall();
@@ -529,7 +400,7 @@ test("patched: a sent queue recall does not clear a later identical draft on Dow
 	try {
 		press(CTRL_P);
 		assert.equal(editor.getText(), "继续");
-		press(ENTER);
+		press(ALT_ENTER);
 		assert.equal(editor.getText(), "", "the recalled text was sent");
 		type("继续");
 		assert.equal(editor.getText(), "继续");
@@ -607,7 +478,7 @@ test("patched: native dequeue restores the compaction queue without leaving a du
 	try {
 		const text = Array.from({ length: 20 }, (_, i) => `第 ${i} 行任务🙂`).join("\n");
 		editor.handleInput(paste(text));
-		press(ENTER);
+		press(ALT_ENTER);
 		assert.equal(editor.getText(), "");
 		assert.equal(session.pendingMessageCount, 0, "the public query cannot see the compaction-only queue");
 		assert.deepEqual(mode.getAllQueuedMessages(), { steering: [], followUp: [text] });
@@ -623,6 +494,19 @@ test("patched: native dequeue restores the compaction queue without leaving a du
 	}
 });
 
+test("uninstall stops the recall and leaves Enter alone", () => {
+	const { editor, calls, type, press } = makeEditor();
+	editor.onAction("app.message.dequeue", () => editor.setText("queued message"));
+	const uninstall = keys.installCcKeys(() => true);
+	type("while patched");
+	press(ENTER);
+	assert.deepEqual(calls, { queue: 0, submit: 1 }, "Enter submits with the patch on too");
+	editor.setText("");
+	uninstall?.();
+	press(UP);
+	assert.equal(editor.getText(), "", "Up is Pi's again");
+});
+
 test("the shared setting turns it off", async () => {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-cc-keys-"));
 	const file = path.join(dir, "pi-cc.json");
@@ -634,10 +518,10 @@ test("the shared setting turns it off", async () => {
 	keys.default(host.pi);
 	try {
 		await host.emit("session_start", { reason: "startup" }, TUI_CTX);
-		const { calls, type, press } = makeEditor();
-		type("plain");
-		press(ENTER);
-		assert.deepEqual(calls, { queue: 0, submit: 1 }, "no patch: Enter submits");
+		const { editor, press } = makeEditor();
+		editor.onAction("app.message.dequeue", () => editor.setText("queued message"));
+		press(UP);
+		assert.equal(editor.getText(), "", "no patch: Up does not restore the queue");
 	} finally {
 		await host.emit("session_shutdown", {}, TUI_CTX);
 		if (previous === undefined) delete process.env.PI_CC_CONFIG_FILE;

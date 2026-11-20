@@ -1,9 +1,9 @@
 /**
  * One patch on CustomEditor.handleInput for the whole package.
  *
- * Two features act on a key press: cc-keys.ts (Enter queues while working,
- * Up recalls queued messages) and draft.ts (Ctrl+C keeps what it
- * clears). Each used to wrap the method itself and remember "the method as it
+ * Two features act on a key press: cc-keys.ts (Up recalls a queued message)
+ * and draft.ts (Ctrl+C keeps what it clears). Each used to wrap the method
+ * itself and remember "the method as it
  * was", which only works while the wrappers come off in the order they went
  * on. With the CC keys turned off, Up no longer brought a cleared draft back
  * (cc-keys was the inner wrapper, so its uninstall put Pi's method back over
