@@ -1,6 +1,6 @@
 {
 	"name": "pi-cc-plugins",
-	"version": "0.6.1",
+	"version": "0.6.2",
 	"description": "Prompt keys for the Pi coding agent: Up brings back a queued message or cleared draft, and a one-line summary closes every run. Enter keeps Pi's own keys.",
 	"author": "tarnish233",
 	"type": "module",
