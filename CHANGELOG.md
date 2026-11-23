@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-23
+
+### Fixed
+- Trim a copy of Pi's cached settings rows instead of mutating the native render result. Settings typecheck cleanly without changing user configuration values.
+
+### Changed
+- Synchronize stable shared settings and current message/key descriptions with Loop, Monitor and Compaction; unfinished custom action pages are not shipped.
+- Require tests and typechecking against Pi 1.6.0 before trusted npm publishing; use installed peers in CI without requiring a global Pi installation.
+
 ## [0.6.0] - 2026-11-20
 
 ### Changed

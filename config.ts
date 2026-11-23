@@ -41,7 +41,7 @@ import os from "node:os";
 import path from "node:path";
 
 export interface PiCcConfig {
-	/** Two-line marker blocks instead of the padded card. */
+	/** One-line notifications with expandable details instead of the legacy padded card. */
 	compactMessages: boolean;
 	/**
 	 * Show a one-line summary in Pi's footer (loops armed, monitors running).
