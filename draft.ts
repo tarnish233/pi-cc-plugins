@@ -27,9 +27,9 @@
  * shutdown, so /reload runs the current code. If the editor lacks anything it
  * relies on, it stays off and Ctrl+C behaves as before.
  *
- * The shared `draft` setting (pi-cc.json, /pi_cc) decides whether it is on at
- * all; it is read at session start and again whenever a pi-cc package changes
- * the settings, so the panel turns the patch on and off without a reload.
+ * The `draft` setting (pi-cc-plugins.json, /plugins_settings) decides whether
+ * it is on at all; it is read at session start and after this package's
+ * settings change, so the panel turns the patch on and off without a reload.
  */
 
 import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent";

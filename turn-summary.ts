@@ -25,7 +25,7 @@
  * stats cover the whole turn, retry attempts included: agent.continue()
  * fires agent_start again, which only opens a new turn after a settle.
  * appendEntry keeps the line out of the model's context: it is only drawn in
- * the chat. The shared `turnSummary` setting (pi-cc.json, /pi_cc) switches
+ * the chat. `turnSummary` (pi-cc-plugins.json, /plugins_settings) switches
  * the line off; saveConfig drops the config cache, so a toggle from the
  * panel applies to the very next run.
  *

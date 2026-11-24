@@ -186,7 +186,7 @@ test("the turn summary can be switched off: no line is written while turnSummary
 		assert.equal(host.entries.length, 0, "off: nothing appended");
 
 		config.saveConfig({ turnSummary: true });
-		host.pi.events.emit("pi-cc:config", {});
+		host.pi.events.emit("pi-cc-plugins:config", {});
 		await host.emit("agent_start");
 		await tool(host, "bash", { command: "ls" });
 		t.mock.timers.tick(11_000);

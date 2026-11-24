@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-24
+
+### Changed
+- Replace the shared /pi_cc command with /plugins_settings, containing only Draft recall, Turn summary and CC keys.
+- Save preferences in pi-cc-plugins.json. When absent, inherit this package's valid keys from pi-cc.json and copy them on the first save without modifying the legacy file; preserve environment overrides and immediate feature toggles.
+- Remove the shared settings-command ownership registry and cross-package settings-copy requirements. Prompt-key behavior is unchanged.
+
+### Fixed
+- Fit settings-panel rows to narrow terminal widths without mutating Pi's cached render arrays, and preserve effective values after failed saves.
+
 ## [0.6.2] - 2026-11-23
 
 ### Fixed

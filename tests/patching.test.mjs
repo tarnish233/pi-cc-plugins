@@ -79,9 +79,9 @@ test("turning the CC keys off leaves Ctrl+C draft recall working", async () => {
 			ui.press(CTRL_C, UP);
 			assert.equal(ui.editor.getText(), "held", "with the keys on, both features work");
 
-			// /pi_cc keys off: the panel and the command both go through here.
+			// /plugins_settings keys off: the panel and the command both go through here.
 			config.saveConfig({ ccKeys: false });
-			host.pi.events.emit("pi-cc:config", config.loadConfig());
+			host.pi.events.emit("pi-cc-plugins:config", config.loadConfig());
 
 			ui.editor.setText("");
 			ui.type("still held");
@@ -111,7 +111,7 @@ test("turning the draft off leaves the CC keys working", async () => {
 		await host.emit("session_start", { reason: "startup" }, TUI_WITH_QUEUE);
 		try {
 			config.saveConfig({ draft: false });
-			host.pi.events.emit("pi-cc:config", config.loadConfig());
+			host.pi.events.emit("pi-cc-plugins:config", config.loadConfig());
 
 			const ui = makeEditor();
 			let restored = 0;
@@ -142,9 +142,9 @@ test("draft off/on through the config bus keeps the cleared draft before the que
 		await host.emit("session_start", { reason: "startup" }, { ...TUI_CTX, hasPendingMessages: () => true });
 		try {
 			config.saveConfig({ draft: false });
-			host.pi.events.emit("pi-cc:config", config.loadConfig());
+			host.pi.events.emit("pi-cc-plugins:config", config.loadConfig());
 			config.saveConfig({ draft: true });
-			host.pi.events.emit("pi-cc:config", config.loadConfig());
+			host.pi.events.emit("pi-cc-plugins:config", config.loadConfig());
 			const ui = makeEditor();
 			ui.editor.onAction("app.message.dequeue", () => ui.editor.setText("queued message"));
 			ui.type("cleared draft");
@@ -170,9 +170,9 @@ test("keys off/on through the config bus under an external wrapper keeps draft p
 		};
 		try {
 			config.saveConfig({ ccKeys: false });
-			host.pi.events.emit("pi-cc:config", config.loadConfig());
+			host.pi.events.emit("pi-cc-plugins:config", config.loadConfig());
 			config.saveConfig({ ccKeys: true });
-			host.pi.events.emit("pi-cc:config", config.loadConfig());
+			host.pi.events.emit("pi-cc-plugins:config", config.loadConfig());
 			const ui = makeEditor();
 			ui.editor.onAction("app.message.dequeue", () => ui.editor.setText("queued message"));
 			ui.type("cleared draft");
@@ -196,8 +196,8 @@ test("an unrelated config toggle keeps the held draft and the user's keybindings
 			ui.editor.onAction("app.message.dequeue", () => ui.editor.setText("queued message"));
 			ui.type("held text");
 			ui.press(CTRL_C);
-			config.saveConfig({ footer: true });
-			host.pi.events.emit("pi-cc:config", config.loadConfig());
+			config.saveConfig({ turnSummary: false });
+			host.pi.events.emit("pi-cc-plugins:config", config.loadConfig());
 			assert.deepEqual(ui.manager.getUserBindings()["tui.input.submit"], ["enter", "ctrl+enter"], "the user's keymap is intact");
 			ui.press(UP);
 			assert.equal(ui.editor.getText(), "held text", "the held draft survives the toggle");
@@ -265,7 +265,7 @@ test("a patch stacked on top plus a draft re-install does not loop the chain", (
 		inner.call(this, data);
 	};
 	try {
-		// /pi_cc draft off then on: draft re-installs into a NEW chain under the
+		// /plugins_settings draft off then on: draft re-installs into a NEW chain under the
 		// third party, while cc-keys stays in the old one.
 		unDraft?.();
 		const unDraft2 = draft.installDraftHold();
@@ -298,7 +298,7 @@ test("a wrapper stacked on addToHistory stops injecting drafts once the feature 
 		const ui = makeEditor();
 		ui.type("secret draft");
 		ui.press(CTRL_C);
-		unDraft?.(); // /pi_cc draft off
+		unDraft?.(); // /plugins_settings draft off
 		ui.editor.addToHistory("sent prompt");
 		assert.deepEqual(ui.editor.history, ["sent prompt"], "the cleared draft stays out of history while off");
 	} finally {

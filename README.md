@@ -24,17 +24,21 @@ ln -sfn "$PWD" ~/.pi/agent/extensions/pi-cc-plugins
 
 包只有一个入口 `index.ts`，在 `pi config` 和启动横幅里显示为一行 `pi-cc-plugins`，和 pi-cc-loop 一样；`pi config` 对它整包启停。三个功能各自在自己的模块里，互不依赖。
 
-## /pi_cc
+## /plugins_settings
 
-本包和 pi-cc-loop、pi-cc-monitor、pi-cc-compaction 共同提供 `/pi_cc`：pi-cc 家族的设置命令。装了任意一个 pi-cc 包它就在；装了多个，也只有一个
-`/pi_cc`（同名命令会被 Pi 改名成 `/pi_cc:1`、`/pi_cc:2`，所以由最先加载的包认领注册）。
+本包独立提供 `/plugins_settings`，只管理这三个功能：
 
-- TUI 里输入 `/pi_cc` 打开设置面板，按插件分页（Tab / Shift+Tab 切换页，上下键选择，Enter/空格切换，Esc 关闭）；非 TUI 输出文字摘要
-- 文字命令：`/pi_cc <项> on|off`，适合脚本和 RPC
-- 本包的三个功能在面板的 Plugins 页：**Draft recall**（`draft`，默认开，Ctrl+C 找回）、**Turn summary**（`turnSummary`，默认开，回合摘要）和 **CC keys**（`ccKeys`，默认开，↑ / Ctrl+P 取回排队消息）；`/pi_cc draft on|off`、`/pi_cc summary on|off`、`/pi_cc keys on|off` 切换
-- 切换即时生效，不用 `/reload`：Ctrl+C 找回和 CC 键的补丁当场装/卸，回合摘要从下一轮开始（或停止）写
-- 环境变量 `PI_CC_DRAFT=0`、`PI_CC_TURN_SUMMARY=0`、`PI_CC_KEYS=0` 可临时覆盖，面板里相应项锁定
-- 另外几项本包不用：`messages`、`footer` 对 loop 和 monitor 的渲染生效，`compact`、`idle` 属于 pi-cc-compaction
+- **Draft recall**（`draft`，默认开）：`/plugins_settings draft on|off`
+- **Turn summary**（`turnSummary`，默认开）：`/plugins_settings summary on|off`
+- **CC keys**（`ccKeys`，默认开）：`/plugins_settings keys on|off`
+
+TUI 中打开单页面板，上下键选择、Enter/空格切换、Esc 关闭；RPC 中不带参数输出文字摘要。切换即时生效，不用 `/reload`：找回和 CC 键的补丁当场装/卸，摘要从下一轮起变化。
+
+默认配置是 `~/.pi/agent/pi-cc-plugins.json`，跟随 `PI_CODING_AGENT_DIR`。新文件缺失时继承旧 `pi-cc.json` 中本包的有效字段，首次保存带入新文件；已有新文件不会被覆盖，旧文件不修改、不删除。`PI_CC_CONFIG_FILE` 显式指定路径时不回读旧文件。
+
+`PI_CC_DRAFT`、`PI_CC_TURN_SUMMARY`、`PI_CC_KEYS` 可临时覆盖，面板中的相应项锁定，变量值不写入文件。其他插件的选项不出现在本面板，也不能通过本命令修改。
+
+本包不再注册共享的 `/pi_cc`；旧脚本改用 `/plugins_settings`。`config.ts`、`settings.ts` 只维护本包的选项，不再要求与其他仓库一致。
 
 ## Ctrl+C 找回
 
@@ -93,7 +97,7 @@ Pi 的 Enter 原样保留：干活时 steer、空闲时发送，Alt+Enter 仍然
 - **独立历史快捷键不受行边界限制**：绑定到 `tui.editor.historyPrevious` / `historyNext` 的键继续直接翻整条 query；同一个键同时绑定到光标移动和独立历史动作时，独立历史动作优先。本包不替你修改这些键位。
 - **只做单条排队**：这个功能只考虑"干活时发一条、↑ 拿回来改"这一种用法。Pi 的 dequeue 没有"只取一条"的接口，所以万一真排了多条，↑ 会把它们一次性全部放回输入框；不提供 CC 那种逐条选择，也不打算做。
 - **终端按键限制**：如果终端把 Ctrl+Enter 报告成普通 Enter，Pi 无法区分，两者都会按 Enter 的规则处理；本包只是不再主动绑定可区分的 Ctrl+Enter。
-- 关掉：`/pi_cc keys off`，或 `PI_CC_KEYS=0`，或直接删掉 pi-cc-plugins。
+- 关掉：`/plugins_settings keys off`，或 `PI_CC_KEYS=0`，或直接删掉 pi-cc-plugins。
 
 ## 兼容性
 

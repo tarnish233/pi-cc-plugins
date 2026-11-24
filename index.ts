@@ -13,13 +13,11 @@ import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import ccKeysExtension from "./cc-keys.ts";
 import { invalidateConfig } from "./config.ts";
 import draftExtension from "./draft.ts";
-import { CONFIG_CHANNEL, registerPiCcCommand } from "./settings.ts";
+import { CONFIG_CHANNEL, registerSettingsCommand } from "./settings.ts";
 import turnSummary from "./turn-summary.ts";
 
 export default function piCcPlugins(pi: ExtensionAPI): void {
-	// Another pi-cc package changed the shared settings: the features read
-	// them again. Each feature listened for itself before; the one cache the
-	// two share makes one listener the honest shape.
+	// The features share this package's config cache and one change listener.
 	// draft first: interceptors see a key in registration order, so Up on the
 	// empty editor brings back what Ctrl+C just cleared before cc-keys reaches
 	// for an older queued message.
@@ -34,7 +32,5 @@ export default function piCcPlugins(pi: ExtensionAPI): void {
 		redraft(true);
 		rekey(true);
 	});
-	// The shared pi-cc settings and their /pi_cc command. The first pi-cc
-	// package to load registers it; this one re-claims its own claim on /reload.
-	registerPiCcCommand(pi, "pi-cc-plugins");
+	registerSettingsCommand(pi);
 }

@@ -350,7 +350,7 @@ test("the patch follows the draft setting: off at start, on and off again from a
 		// The listener that follows config changes lives in index.ts now; wire
 		// it the way index.ts does.
 		const redraft = draft.default(host.pi);
-		host.pi.events.on("pi-cc:config", () => {
+		host.pi.events.on("pi-cc-plugins:config", () => {
 			config.invalidateConfig();
 			redraft();
 		});
@@ -361,16 +361,16 @@ test("the patch follows the draft setting: off at start, on and off again from a
 		ui.press(UP);
 		assert.equal(ui.editor.getText(), "", "off: nothing is held");
 
-		// Turned on through the shared /pi_cc command's channel.
+		// Turned on through /plugins_settings' change channel.
 		config.saveConfig({ draft: true });
-		host.pi.events.emit("pi-cc:config", {});
+		host.pi.events.emit("pi-cc-plugins:config", {});
 		ui.type("held");
 		ui.press(CTRL_C);
 		ui.press(UP);
 		assert.equal(ui.editor.getText(), "held", "on: the draft comes back");
 
 		config.saveConfig({ draft: false });
-		host.pi.events.emit("pi-cc:config", {});
+		host.pi.events.emit("pi-cc-plugins:config", {});
 		ui.editor.setText("");
 		ui.type("gone");
 		ui.press(CTRL_C);

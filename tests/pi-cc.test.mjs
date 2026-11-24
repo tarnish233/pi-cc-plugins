@@ -1,134 +1,215 @@
-/**
- * index.ts registers /pi_cc for this package: the shared settings command
- * from settings.ts (the same bytes as in pi-cc-loop and pi-cc-monitor). Only
- * the first pi-cc package to load in a session gets the command, so that
- * session never sees /pi_cc:1 and /pi_cc:2. Independent sessions each get one.
- */
+const COMMAND = "plugins_settings";
+const TITLE = "Plugins";
+const CHANNEL = "pi-cc-plugins:config";
+const FIELDS = ["draft","turnSummary","ccKeys"];
+const WORDS = ["draft","summary","keys"];
+const LABELS = ["Draft recall","Turn summary","CC keys"];
+const OVERRIDE = "PI_CC_DRAFT";
+const FOREIGN = "footer";
+
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { test } from "node:test";
-import { fakePi, loadModule } from "./helpers.mjs";
+import test from "node:test";
+import { pathToFileURL } from "node:url";
+import { findPiInstall, loadModule } from "./helpers.mjs";
 
-const index = await loadModule("index.ts");
-const settings = await loadModule("settings.ts");
 const config = await loadModule("config.ts");
+const { registerSettingsCommand, CONFIG_CHANNEL } = await loadModule("settings.ts");
+const { visibleWidth, TuiAltScreen, KeybindingsManager, TUI_KEYBINDINGS } = await import(pathToFileURL(findPiInstall().piTui).href);
+const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 
-function withTempConfig(body) {
-	const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pi-cc-plugins-")), "pi-cc.json");
-	const saved = process.env.PI_CC_CONFIG_FILE;
-	process.env.PI_CC_CONFIG_FILE = file;
-	config.invalidateConfig();
-	return Promise.resolve(body(file)).finally(() => {
-		process.env.PI_CC_CONFIG_FILE = saved;
+async function withFile(body, initial = {}) {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "settings-command-"));
+	const file = path.join(dir, "settings.json");
+	const env = { PI_CC_CONFIG_FILE: file, [OVERRIDE]: undefined };
+	const previous = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+	try {
+		for (const [key, value] of Object.entries(env)) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+		fs.writeFileSync(file, JSON.stringify(initial));
 		config.invalidateConfig();
-	});
+		return await body(file, dir);
+	} finally {
+		for (const [key, value] of Object.entries(previous)) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+		config.invalidateConfig();
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
 }
 
-/** A context the command can notify through, with a panel the way ctx.ui.custom hands it out. */
-function panelCtx(notifications) {
-	let panel;
-	const ctx = {
-		mode: "tui",
-		hasUI: true,
-		ui: {
-			notify: (message, level) => notifications.push({ message, level }),
-			custom: (factory) =>
-				new Promise((resolve) => {
-					panel = factory({ requestRender: () => {} }, { fg: (_c, t) => t, bold: (t) => t }, {}, resolve);
-				}),
-		},
+function host() {
+	const commands = new Map(), events = [], notifications = [];
+	const pi = {
+		registerCommand(name, command) { commands.set(name, command); },
+		events: { emit(channel, data) { events.push({ channel, data }); } },
 	};
-	return { ctx, panel: () => panel };
+	const ctx = { mode: "tui", hasUI: true, ui: { notify(message, level) { notifications.push({ message, level }); } } };
+	registerSettingsCommand(pi);
+	return { pi, ctx, commands, events, notifications, command: commands.get(COMMAND) };
 }
 
-test("/pi_cc is single per shared runtime, independent per session, and released at shutdown", async () => {
-	const host = fakePi();
-	index.default(host.pi);
-	assert.ok(host.commands.has("pi_cc"), "/pi_cc is registered");
-	assert.deepEqual(host.calls, [], "nothing beyond handlers, entries, renderers and commands");
+function open(h) {
+	let panel, options, renders = 0;
+	h.ctx.ui.custom = (factory, suppliedOptions) => new Promise((resolve) => {
+		options = suppliedOptions;
+		panel = factory({ requestRender() { renders++; } }, { fg: (_role, text) => text, bold: (text) => text }, {}, resolve);
+	});
+	const closed = h.command.handler("", h.ctx);
+	assert.ok(panel, "the settings panel opened");
+	return { panel, closed, options, screen: (width = 100) => panel.render(width).join("\n"), renders: () => renders };
+}
 
-	const independent = fakePi();
-	settings.registerPiCcCommand(independent.pi, "pi-cc-loop");
-	assert.ok(independent.commands.has("pi_cc"), "another session is not blocked by this runtime");
-
-	const other = fakePi();
-	other.pi.events = host.pi.events;
-	settings.registerPiCcCommand(other.pi, "pi-cc-loop");
-	assert.ok(!other.commands.has("pi_cc"), "the shared-runtime claim keeps the command single");
-
-	await host.emit("session_shutdown", {}, { mode: "tui", hasUI: false });
-	const third = fakePi();
-	third.pi.events = host.pi.events;
-	settings.registerPiCcCommand(third.pi, "pi-cc-loop");
-	assert.ok(third.commands.has("pi_cc"), "the shared-runtime claim is released at shutdown");
+test("the package registers its own command without command ownership or discovery", () => {
+	const h = host();
+	assert.deepEqual([...h.commands.keys()], [COMMAND]);
+	assert.equal(CONFIG_CHANNEL, CHANNEL);
+	assert.deepEqual(h.events, [], "no shared-settings probes are needed");
+	registerSettingsCommand(h.pi);
+	assert.deepEqual([...h.commands.keys()], [COMMAND], "the same package can register again on reload");
+	assert.ok(host().commands.has(COMMAND), "independent sessions get the command too");
 });
 
-test("/pi_cc footer on|off writes the shared pi-cc.json and tells the other packages", async () => {
-	await withTempConfig(async (file) => {
-		const host = fakePi();
-		index.default(host.pi);
-		await host.commands.get("pi_cc").handler("footer off", panelCtx([]).ctx);
-		assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).footer, false);
-		assert.ok(host.busEvents.some((event) => event.channel === "pi-cc:config"), "the other packages are told");
+test("text toggles and aliases write only this package's fields and preserve unknown data", async () => {
+	await withFile(async (file) => {
+		const h = host();
+		for (let i = 0; i < WORDS.length; i++) await h.command.handler(WORDS[i] + " OFF", h.ctx);
+		assert.deepEqual(readJson(file), { mine: "kept", ...Object.fromEntries(FIELDS.map((field) => [field, false])) });
+		await h.command.handler("config " + WORDS[0] + " true", { mode: "print", hasUI: false, ui: {} });
+		assert.equal(readJson(file)[FIELDS[0]], true);
+		assert.ok(h.events.length > 0);
+		assert.ok(h.events.every((event) => event.channel === CHANNEL), "only this package is notified");
+	}, { mine: "kept" });
+});
 
-		await host.commands.get("pi_cc").handler("settings footer on", { mode: "print", hasUI: false, ui: {} });
-		assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).footer, true, "the old /loop settings wording still parses");
+test("foreign settings, missing values and invalid booleans never change the file", async () => {
+	await withFile(async (file) => {
+		const h = host();
+		const before = fs.readFileSync(file, "utf8");
+		for (const input of [FOREIGN + " off", WORDS[0], WORDS[0] + " maybe", "__proto__ off", "constructor off", "help"]) {
+			await h.command.handler(input, h.ctx);
+			assert.equal(fs.readFileSync(file, "utf8"), before);
+		}
+		assert.deepEqual(h.events, []);
+		assert.ok(h.notifications.at(-1).message.includes("Usage: /" + COMMAND));
 	});
 });
 
-test("a bare /pi_cc opens the panel; outside the TUI it prints the summary", async () => {
-	await withTempConfig(async () => {
-		const host = fakePi();
-		index.default(host.pi);
-		const notifications = [];
-		const { ctx, panel } = panelCtx(notifications);
-		const opened = host.commands.get("pi_cc").handler("", ctx);
-		assert.ok(panel(), "the panel opened");
-		assert.equal(notifications.length, 0, "no notice while the panel is up");
-		panel().handleInput("\x1b"); // Esc closes
-		await opened;
-
-		await host.commands.get("pi_cc").handler("", { mode: "rpc", hasUI: true, ui: { notify: (m, l) => notifications.push({ m, l }) } });
-		assert.match(notifications.at(-1).m, /pi-cc settings/);
+test("RPC gets only this package's summary and never opens TUI components", async () => {
+	await withFile(async () => {
+		const h = host();
+		h.ctx.mode = "rpc";
+		h.ctx.ui.custom = () => { throw new Error("RPC must not open the panel"); };
+		await h.command.handler("", h.ctx);
+		const summary = h.notifications.at(-1).message;
+		assert.ok(summary.startsWith(TITLE + " settings"));
+		assert.ok(summary.includes("Usage: /" + COMMAND));
+		for (const word of WORDS) assert.ok(summary.includes("  " + word + ":"));
+		assert.ok(!summary.includes("  " + FOREIGN + ":"));
 	});
 });
 
-test("standalone pi-cc-plugins shows only its own settings, with no irrelevant page switching", async () => {
-	await withTempConfig(async () => {
-		const host = fakePi();
-		index.default(host.pi);
-		const notifications = [];
-		const { ctx, panel } = panelCtx(notifications);
-		const opened = host.commands.get("pi_cc").handler("", ctx);
-		const screen = () => panel().render(100).join("\n");
-		assert.match(screen(), /→ Draft recall +on/);
-		assert.match(screen(), /Turn summary +on/);
-		assert.match(screen(), /CC keys +on/);
-		assert.doesNotMatch(screen(), /Loop & Monitor|Compact|Message style|CC compaction/);
-		assert.doesNotMatch(screen(), /Tab\/Shift\+Tab/);
-		panel().handleInput("\t");
-		assert.match(screen(), /→ Draft recall +on/, "Tab does not switch to an unloaded package");
-		panel().handleInput("\x1b");
-		await opened;
+test("the single-page panel saves immediately, fits narrow terminals and closes on Esc", async () => {
+	await withFile(async (file) => {
+		const h = host(), ui = open(h);
+		try {
+			assert.ok(ui.screen().includes(TITLE));
+			for (const label of LABELS) assert.ok(ui.screen().includes(label));
+			assert.ok(!ui.screen().includes("Tab/Shift+Tab"));
+			assert.equal(ui.options.blocked.kind, "question");
+			for (const width of [0, 1, 6, 20, 40, 80, 150]) {
+				for (const line of ui.panel.render(width)) assert.ok(visibleWidth(line) <= width, "line exceeds width " + width);
+			}
+			ui.panel.handleInput(" ");
+			assert.equal(readJson(file)[FIELDS[0]], false);
+			ui.panel.handleInput("\x1b[B");
+			ui.panel.handleInput("\r");
+			assert.equal(readJson(file)[FIELDS[1]], false);
+			assert.ok(ui.renders() > 0);
+			assert.deepEqual(h.notifications, [], "the panel itself shows changes, without chat notices");
+			assert.ok(h.events.every((event) => event.channel === CHANNEL));
+		} finally {
+			ui.panel.handleInput("\x1b");
+			await ui.closed;
+		}
 	});
 });
 
-test("/pi_cc draft off, /pi_cc summary off and /pi_cc keys off write those keys", async () => {
-	await withTempConfig(async (file) => {
-		const host = fakePi();
-		index.default(host.pi);
-		const ctx = { mode: "print", hasUI: true, ui: { notify: () => {} } };
-		await host.commands.get("pi_cc").handler("draft off", ctx);
-		await host.commands.get("pi_cc").handler("summary off", ctx);
-		await host.commands.get("pi_cc").handler("keys off", ctx);
-		assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), { draft: false, turnSummary: false, ccKeys: false });
-		const notices = [];
-		const printCtx = { mode: "rpc", hasUI: true, ui: { notify: (m) => notices.push(m) } };
-		await host.commands.get("pi_cc").handler("bogus", ctx);
-		await host.commands.get("pi_cc").handler("", printCtx);
-		assert.match(notices.at(-1), /draft: +off/);
-		assert.match(notices.at(-1), /summary: +off/);
+test("environment overrides lock the panel but text commands can save a choice for later", async () => {
+	await withFile(async (file) => {
+		process.env[OVERRIDE] = "0";
+		config.invalidateConfig();
+		const h = host(), ui = open(h);
+		try {
+			assert.ok(ui.screen().includes(OVERRIDE + "=0 overrides this while set"));
+			ui.panel.handleInput(" ");
+			assert.deepEqual(readJson(file), {});
+		} finally {
+			ui.panel.handleInput("\x1b");
+			await ui.closed;
+		}
+		await h.command.handler(WORDS[0] + " on", h.ctx);
+		assert.equal(readJson(file)[FIELDS[0]], true);
+		assert.equal(config.loadConfig()[FIELDS[0]], false);
+		assert.equal(h.notifications.at(-1).level, "warning");
 	});
+});
+
+test("a failed save rolls back inside real terminal input and emits no config change", async (t) => {
+	await withFile(async (file, dir) => {
+		const h = host();
+		const tui = new TuiAltScreen({ columns: 100, rows: 30, write() {}, start() {}, stop() {}, hideCursor() {}, showCursor() {} }, false, dir);
+		tui.requestRender = () => {};
+		let component;
+		h.ctx.ui.custom = (factory) => new Promise((resolve) => {
+			component = factory(tui, { fg: (_role, text) => text, bold: (text) => text }, new KeybindingsManager(TUI_KEYBINDINGS, {}), resolve);
+			tui.setFocus(component);
+		});
+		const closed = h.command.handler("", h.ctx);
+		try {
+			fs.chmodSync(dir, 0o500);
+			try {
+				const probe = path.join(dir, "probe");
+				try { fs.writeFileSync(probe, "x"); fs.rmSync(probe); return t.skip("directory permissions do not restrict this user"); } catch {}
+				tui.handleTerminalInput(" ");
+				await assert.rejects(h.command.handler(WORDS[0] + " off", h.ctx), /EACCES/);
+			} finally {
+				fs.chmodSync(dir, 0o700);
+			}
+			assert.equal(h.notifications.at(-1).level, "error");
+			assert.match(h.notifications.at(-1).message, /Could not save the setting/);
+			assert.deepEqual(readJson(file), {});
+			assert.equal(config.loadConfig()[FIELDS[0]], true);
+			assert.ok(component.render(100).join("\n").includes(LABELS[0]));
+			assert.deepEqual(h.events, []);
+		} finally {
+			fs.chmodSync(dir, 0o700);
+			component.handleInput("\x1b");
+			await closed;
+			tui.stop();
+		}
+	});
+});
+
+test("a broken change listener cannot turn a successful save into a failed command", async () => {
+	await withFile(async (file) => {
+		const h = host();
+		h.pi.events.emit = () => { throw new Error("broken listener"); };
+		await h.command.handler(WORDS[0] + " off", h.ctx);
+		assert.equal(readJson(file)[FIELDS[0]], false);
+		assert.equal(h.notifications.at(-1).level, "info");
+	});
+});
+
+test("the package entry point registers /plugins_settings, not the shared /pi_cc", async () => {
+	const { fakePi } = await import("./helpers.mjs");
+	const h = fakePi();
+	(await loadModule("index.ts")).default(h.pi);
+	assert.deepEqual([...h.commands.keys()], [COMMAND]);
+	assert.deepEqual(h.calls, [], "settings never alter the tools or system prompt");
 });
